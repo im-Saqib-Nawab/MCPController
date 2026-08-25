@@ -8,8 +8,32 @@
       "destination": "/api"
     },
     {
-      "source": "/(.*)",
+      "source": "/oauth/token",
       "destination": "/api"
+    },
+    {
+      "source": "/oauth/register",
+      "destination": "/api"
+    },
+    {
+      "source": "/oauth/revoke",
+      "destination": "/api"
+    },
+    {
+      "source": "/mcp",
+      "destination": "/api"
+    },
+    {
+      "source": "/.well-known/(.*)",
+      "destination": "/api"
+    },
+    {
+      "source": "/(dashboard|login|oauth/authorize|oauth/success)",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/",
+      "destination": "/index.html"
     }
   ],
   "functions": {

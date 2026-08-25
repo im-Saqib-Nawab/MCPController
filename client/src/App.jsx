@@ -21,6 +21,14 @@ export default function App() {
       .finally(() => setLoading(false));
   }, []);
 
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center px-4 text-sm text-slate-500">
+        Checking your session...
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen">
       <Navbar user={user} onLogout={() => setUser(null)} />
