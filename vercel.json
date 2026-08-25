@@ -28,7 +28,7 @@
       "destination": "/api"
     },
     {
-      "source": "/(dashboard|login|oauth/authorize|oauth/success)",
+      "source": "/(dashboard|login|oauth/authorize|oauth/success|connections|profile)",
       "destination": "/index.html"
     },
     {
