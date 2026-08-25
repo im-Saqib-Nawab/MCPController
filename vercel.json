@@ -1,0 +1,16 @@
+{
+  "version": 2,
+  "buildCommand": "npm install && npm run build",
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/api"
+    }
+  ],
+  "functions": {
+    "api/index.js": {
+      "includeFiles": "client/dist/**",
+      "maxDuration": 60
+    }
+  }
+}
