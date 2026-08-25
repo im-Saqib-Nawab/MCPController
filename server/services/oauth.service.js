@@ -293,9 +293,10 @@ function extractClientSecret(req) {
   };
 }
 
-async function authenticateOAuthClient(req) {
+async function authenticateOAuthClient(req, fallbackClientId = null) {
   const { clientId, clientSecret } = extractClientSecret(req);
-  const client = await findClient(clientId);
+  const resolvedClientId = clientId || fallbackClientId;
+  const client = await findClient(resolvedClientId);
   if (client.tokenEndpointAuthMethod === 'none') {
     return client;
   }
@@ -307,9 +308,9 @@ async function authenticateOAuthClient(req) {
 
 export async function exchangeToken(req) {
   const grantType = req.body.grant_type;
-  const client = await authenticateOAuthClient(req);
 
   if (grantType === 'refresh_token') {
+    await authenticateOAuthClient(req);
     const tokens = await rotateRefreshToken(req.body.refresh_token);
     if (!tokens) {
       throw new AppError(400, 'invalid_grant', 'Token expired');
@@ -322,8 +323,8 @@ export async function exchangeToken(req) {
   }
 
   const { code, redirect_uri, code_verifier, resource } = req.body;
-  if (!code || !redirect_uri || !code_verifier) {
-    throw new AppError(400, 'invalid_request', 'code, redirect_uri, and code_verifier are required.');
+  if (!code || !code_verifier) {
+    throw new AppError(400, 'invalid_request', 'code and code_verifier are required.');
   }
 
   const record = await AuthorizationCode.findOne({ codeHash: hashToken(code) });
@@ -336,10 +337,14 @@ export async function exchangeToken(req) {
   if (record.expiresAt.getTime() <= Date.now()) {
     throw new AppError(400, 'invalid_authorization_code', 'Authorization code has expired.');
   }
+
+  const client = await authenticateOAuthClient(req, record.clientId);
   if (record.clientId !== client.clientId) {
     throw new AppError(400, 'invalid_grant', 'Authorization code does not belong to this client.');
   }
-  if (record.redirectUri !== redirect_uri) {
+
+  const resolvedRedirectUri = redirect_uri || record.redirectUri;
+  if (record.redirectUri !== resolvedRedirectUri) {
     throw new AppError(400, 'invalid_grant', 'redirect_uri does not match the authorization request.');
   }
   if (resource && resource !== record.resource) {

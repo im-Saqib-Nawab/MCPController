@@ -50,16 +50,13 @@ export default function Authorize() {
   async function decide(decision) {
     setError('');
     try {
-      console.log('Sending consent with:', { decision, scopes: selected, query });
       const { data } = await api.post('/oauth/consent', {
         decision,
         scopes: selected,
         query
       });
-      console.log('Consent response:', data);
       window.location.assign(data.redirectUrl);
     } catch (err) {
-      console.error('Consent error:', err.response?.data || err);
       setError(getErrorMessage(err));
     }
   }

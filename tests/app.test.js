@@ -132,6 +132,40 @@ test('OAuth authorization stores only approved scopes and token contains approve
   assert.equal(tokenRes.body.scope, 'doctor:read doctor:write');
 });
 
+test('public client token exchange can omit client_id and redirect_uri', async () => {
+  const client = await createClient('public-client-no-token-auth');
+  const agent = request.agent(app);
+  await loginAdmin(agent);
+
+  const { verifier, challenge } = pkce();
+  const query = {
+    response_type: 'code',
+    client_id: client.clientId,
+    redirect_uri: client.redirectUris[0],
+    scope: 'doctor:read doctor:write',
+    code_challenge: challenge,
+    code_challenge_method: 'S256',
+    resource: mcpResourceUrl()
+  };
+
+  const consent = await agent.post('/api/oauth/consent').send({
+    decision: 'allow',
+    scopes: ['doctor:read'],
+    query
+  });
+  const code = new URL(consent.body.redirectUrl).searchParams.get('code');
+
+  const tokenRes = await request(app).post('/oauth/token').type('form').send({
+    grant_type: 'authorization_code',
+    code,
+    code_verifier: verifier,
+    resource: mcpResourceUrl()
+  });
+
+  assert.equal(tokenRes.status, 200);
+  assert.equal(tokenRes.body.scope, 'doctor:read');
+});
+
 test('doctor tools honor read and write scopes and block delete without doctor:delete', async () => {
   await Doctor.deleteMany({});
   const initialDoctor = await Doctor.create({ name: 'Dr. Smith', specialization: 'Cardiology' });
