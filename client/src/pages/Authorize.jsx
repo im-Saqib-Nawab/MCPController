@@ -24,7 +24,11 @@ export default function Authorize() {
         const { data } = await api.get('/oauth/request', { params: query });
         if (cancelled) return;
         setPreview(data);
-        setSelected(data.scopes.map((scope) => scope.value));
+        setSelected(
+          data.scopes
+            .filter((scope) => scope.requested !== false)
+            .map((scope) => scope.value)
+        );
       } catch (err) {
         if (!cancelled) setError(getErrorMessage(err));
       } finally {

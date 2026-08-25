@@ -5,7 +5,10 @@ import { AppError } from '../middleware/error.middleware.js';
 function challenge() {
   const metadata = `${config.apiUrl}/.well-known/oauth-protected-resource`;
   // RFC 9728: unauthenticated clients discover the authorization server from this header.
-  return `Bearer realm="MCPController", resource_metadata="${metadata}", scope="doctor:read"`;
+  // ChatGPT copies this `scope` into the authorize request, so it must list every
+  // permission we want on the consent screen — not only doctor:read.
+  const scope = config.scopes.join(' ');
+  return `Bearer realm="MCPController", resource_metadata="${metadata}", scope="${scope}"`;
 }
 
 /**

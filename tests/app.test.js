@@ -316,6 +316,44 @@ test('revoked token cannot use MCP', async () => {
   assert.equal(denied.status, 401);
 });
 
+test('consent preview lists write and delete even if ChatGPT only requests doctor:read', async () => {
+  const client = await createClient('read-only-request-client');
+  const agent = request.agent(app);
+  await loginAdmin(agent);
+
+  const { challenge } = pkce();
+  const preview = await agent.get('/api/oauth/request').query({
+    response_type: 'code',
+    client_id: client.clientId,
+    redirect_uri: client.redirectUris[0],
+    scope: 'doctor:read',
+    state: 'scope-subset',
+    code_challenge: challenge,
+    code_challenge_method: 'S256',
+    resource: mcpResourceUrl()
+  });
+  assert.equal(preview.status, 200);
+  assert.deepEqual(
+    preview.body.scopes.map((scope) => scope.value),
+    ['doctor:read', 'doctor:write', 'doctor:delete']
+  );
+  assert.equal(preview.body.scopes.find((scope) => scope.value === 'doctor:read').requested, true);
+  assert.equal(preview.body.scopes.find((scope) => scope.value === 'doctor:write').requested, false);
+});
+
+test('unauthenticated MCP advertises all doctor scopes', async () => {
+  const response = await request(app)
+    .post('/mcp')
+    .set('Accept', 'application/json')
+    .set('Content-Type', 'application/json')
+    .send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} });
+  assert.equal(response.status, 401);
+  const header = response.headers['www-authenticate'] || '';
+  assert.match(header, /doctor:read/);
+  assert.match(header, /doctor:write/);
+  assert.match(header, /doctor:delete/);
+});
+
 test('discovery documents are published', async () => {
   const as = await request(app).get('/.well-known/oauth-authorization-server');
   assert.equal(as.status, 200);

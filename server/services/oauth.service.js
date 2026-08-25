@@ -179,15 +179,19 @@ export async function previewAuthorization(query) {
     // Never bounce the user to an unregistered URI — that is an open redirect.
     throw new AppError(400, 'invalid_redirect_uri', 'Invalid redirect URI');
   }
-  const allowed = params.scopes.filter((scope) => client.allowedScopes.includes(scope));
+  // Offer every scope this client may receive. ChatGPT often requests only
+  // doctor:read (from a stale 401 challenge); the Admin still needs to see
+  // write/delete and can grant them.
+  const offered = config.scopes.filter((scope) => client.allowedScopes.includes(scope));
   return {
     client: {
       clientId: client.clientId,
       clientName: client.clientName
     },
-    scopes: allowed.map((value) => ({
+    scopes: offered.map((value) => ({
       value,
-      label: SCOPE_LABELS[value] || value
+      label: SCOPE_LABELS[value] || value,
+      requested: params.scopes.includes(value)
     })),
     redirectUri: params.redirectUri,
     state: params.state,

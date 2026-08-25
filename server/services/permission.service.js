@@ -3,8 +3,8 @@ import { AppError } from '../middleware/error.middleware.js';
 /**
  * MCP tool → required OAuth scope.
  *
- * ChatGPT may request all three scopes, but the Admin can grant a subset on
- * the consent screen. Only granted scopes are written onto the access token.
+ * The consent screen offers doctor:read, doctor:write, and doctor:delete.
+ * The Admin can grant a subset. Only granted scopes are written onto the access token.
  * Every tool call checks the token again here — the UI never grants access alone.
  */
 export const TOOL_SCOPES = {
