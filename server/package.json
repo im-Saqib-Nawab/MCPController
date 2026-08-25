@@ -7,12 +7,12 @@
     "dev": "node --watch index.js",
     "start": "node index.js",
     "seed": "node seed/seed.js",
-    "test": "node --test --test-concurrency=1 --test-timeout=60000 ../tests/permissions.test.js ../tests/app.test.js"
+    "test": "node --test --test-concurrency=1 --test-timeout=60000 ../tests/permissions.test.js ../tests/doctor.test.js ../tests/app.test.js"
   },
   "dependencies": {
     "@modelcontextprotocol/node": "^2.0.0",
     "@modelcontextprotocol/server": "^2.0.0",
-    "bcrypt": "^6.0.0",
+    "bcryptjs": "^3.0.3",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^16.6.1",

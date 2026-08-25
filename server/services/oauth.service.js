@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { OAuthClient } from '../models/OAuthClient.js';
 import { AuthorizationCode } from '../models/AuthorizationCode.js';
 import { Connection } from '../models/Connection.js';
+import { AccessToken } from '../models/AccessToken.js';
 import { config, issuerUrl, mcpResourceUrl } from '../config/env.js';
 import { AppError } from '../middleware/error.middleware.js';
 import {
@@ -13,9 +14,9 @@ import {
 } from './token.service.js';
 
 export const SCOPE_LABELS = {
-  read: 'Read profile and records',
-  write: 'Create and update records',
-  delete: 'Delete records'
+  'doctor:read': 'Read Doctors',
+  'doctor:write': 'Add & Update Doctors',
+  'doctor:delete': 'Delete Doctors'
 };
 
 export function parseScopes(scope) {
@@ -250,6 +251,26 @@ export async function denyAuthorization(query) {
   redirect.searchParams.set('error', 'access_denied');
   if (params.state) redirect.searchParams.set('state', params.state);
   return { redirectUrl: redirect.toString() };
+}
+
+export async function revokeToken(token) {
+  if (!token) {
+    throw new AppError(400, 'invalid_request', 'token is required');
+  }
+
+  const record = await AccessToken.findOne({
+    $or: [{ tokenHash: hashToken(token) }, { refreshTokenHash: hashToken(token) }]
+  });
+
+  if (!record) {
+    return { revoked: false };
+  }
+
+  record.revoked = true;
+  await record.save();
+  await Connection.deleteOne({ userId: record.userId, clientId: record.clientId });
+
+  return { revoked: true };
 }
 
 function extractClientSecret(req) {

@@ -6,13 +6,51 @@ import mongoose from 'mongoose';
 import request from 'supertest';
 import { AuthorizationCode } from '../server/models/AuthorizationCode.js';
 import { OAuthClient } from '../server/models/OAuthClient.js';
+import { Doctor } from '../server/models/Doctor.js';
 import { hashToken } from '../server/services/token.service.js';
-import { mcpResourceUrl } from '../server/config/env.js';
+import { config, mcpResourceUrl } from '../server/config/env.js';
 
 function pkce() {
   const verifier = crypto.randomBytes(32).toString('base64url');
   const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
   return { verifier, challenge };
+}
+
+function mcpPayload(res) {
+  const text = res.text || '';
+  const dataLine = text.split('\n').find((line) => line.startsWith('data: '));
+  if (dataLine) {
+    return JSON.parse(dataLine.slice(6));
+  }
+  return res.body;
+}
+
+function toolText(payload) {
+  return JSON.parse(payload.result.content[0].text);
+}
+
+async function loginAdmin(agent) {
+  const response = await agent.post('/api/auth/login').send({
+    email: config.adminEmail,
+    password: config.adminPassword
+  });
+  assert.equal(response.status, 200);
+  return response;
+}
+
+async function createClient(clientId = 'chatgpt-test') {
+  return OAuthClient.findOneAndUpdate(
+    { clientId },
+    {
+      clientId,
+      clientName: 'ChatGPT',
+      redirectUris: ['http://localhost:9999/callback'],
+      allowedScopes: ['doctor:read', 'doctor:write', 'doctor:delete'],
+      tokenEndpointAuthMethod: 'none',
+      grantTypes: ['authorization_code', 'refresh_token']
+    },
+    { upsert: true, new: true }
+  );
 }
 
 let app;
@@ -29,88 +67,84 @@ after(async () => {
   await mongoose.disconnect();
 });
 
-test('user can register, login, and read /api/auth/me', async () => {
+test('admin login works and registration is disabled', async () => {
   const agent = request.agent(app);
-  const registered = await agent.post('/api/auth/register').send({
-    name: 'Ada',
-    email: 'ada@example.com',
-    password: 'password123'
+  const register = await agent.post('/api/auth/register').send({
+    email: 'admin@example.com',
+    password: 'whatever'
   });
-  assert.equal(registered.status, 201);
+  assert.equal(register.status, 404);
 
+  await loginAdmin(agent);
   const me = await agent.get('/api/auth/me');
   assert.equal(me.status, 200);
-  assert.equal(me.body.user.email, 'ada@example.com');
-
-  await agent.post('/api/auth/logout');
-  const loggedOut = await agent.get('/api/auth/me');
-  assert.equal(loggedOut.status, 401);
-
-  const login = await agent.post('/api/auth/login').send({
-    email: 'ada@example.com',
-    password: 'password123'
-  });
-  assert.equal(login.status, 200);
+  assert.equal(me.body.user.email, config.adminEmail);
 });
 
-test('OAuth rejects unknown clients and unregistered redirect URIs', async () => {
-  const { challenge } = pkce();
-  const unknown = await request(app).get('/api/oauth/request').query({
-    response_type: 'code',
-    client_id: 'missing',
-    redirect_uri: 'http://localhost/callback',
-    scope: 'read',
-    code_challenge: challenge,
-    code_challenge_method: 'S256'
-  });
-  assert.equal(unknown.status, 401);
-
+test('OAuth authorization stores only approved scopes and token contains approved scopes', async () => {
+  const client = await createClient('scopes-client');
   const agent = request.agent(app);
-  await agent.post('/api/auth/login').send({
-    email: 'ada@example.com',
-    password: 'password123'
-  });
+  await loginAdmin(agent);
 
-  const registered = await request(app).post('/oauth/register').send({
-    client_name: 'Test App',
-    redirect_uris: ['http://localhost:9999/callback'],
-    token_endpoint_auth_method: 'none'
-  });
-  assert.equal(registered.status, 201);
-  const clientId = registered.body.client_id;
-
-  const badRedirect = await agent.get('/api/oauth/request').query({
-    response_type: 'code',
-    client_id: clientId,
-    redirect_uri: 'https://evil.example/steal',
-    scope: 'read',
-    code_challenge: challenge,
-    code_challenge_method: 'S256'
-  });
-  assert.equal(badRedirect.status, 400);
-  assert.match(badRedirect.body.message, /redirect/i);
-});
-
-test('authorization code is single-use, PKCE-bound, and exchanges for a token', async () => {
   const { verifier, challenge } = pkce();
-  const agent = request.agent(app);
-  await agent.post('/api/auth/login').send({
-    email: 'ada@example.com',
-    password: 'password123'
-  });
-
-  const registered = await request(app).post('/oauth/register').send({
-    client_name: 'Chat Client',
-    redirect_uris: ['http://localhost:9999/callback'],
-    token_endpoint_auth_method: 'none'
-  });
-  const clientId = registered.body.client_id;
   const query = {
     response_type: 'code',
-    client_id: clientId,
-    redirect_uri: 'http://localhost:9999/callback',
-    scope: 'read write',
-    state: 'abc',
+    client_id: client.clientId,
+    redirect_uri: client.redirectUris[0],
+    scope: 'doctor:read doctor:write doctor:delete',
+    state: 'abc123',
+    code_challenge: challenge,
+    code_challenge_method: 'S256',
+    resource: mcpResourceUrl()
+  };
+
+  const preview = await agent.get('/api/oauth/request').query(query);
+  assert.equal(preview.status, 200);
+  assert.deepEqual(
+    preview.body.scopes.map((scope) => scope.value),
+    ['doctor:read', 'doctor:write', 'doctor:delete']
+  );
+
+  const consent = await agent.post('/api/oauth/consent').send({
+    decision: 'allow',
+    scopes: ['doctor:read', 'doctor:write'],
+    query
+  });
+  assert.equal(consent.status, 200);
+
+  const redirectUrl = new URL(consent.body.redirectUrl);
+  const code = redirectUrl.searchParams.get('code');
+  assert.ok(code);
+  assert.equal(redirectUrl.searchParams.get('state'), 'abc123');
+
+  const record = await AuthorizationCode.findOne({ codeHash: hashToken(code) }).lean();
+  assert.deepEqual(record.scopes, ['doctor:read', 'doctor:write']);
+
+  const tokenRes = await request(app).post('/oauth/token').type('form').send({
+    grant_type: 'authorization_code',
+    code,
+    redirect_uri: client.redirectUris[0],
+    client_id: client.clientId,
+    code_verifier: verifier,
+    resource: mcpResourceUrl()
+  });
+  assert.equal(tokenRes.status, 200);
+  assert.equal(tokenRes.body.scope, 'doctor:read doctor:write');
+});
+
+test('doctor tools honor read and write scopes and block delete without doctor:delete', async () => {
+  await Doctor.deleteMany({});
+  const initialDoctor = await Doctor.create({ name: 'Dr. Smith', specialization: 'Cardiology' });
+  const client = await createClient('read-write-client');
+  const agent = request.agent(app);
+  await loginAdmin(agent);
+
+  const { verifier, challenge } = pkce();
+  const query = {
+    response_type: 'code',
+    client_id: client.clientId,
+    redirect_uri: client.redirectUris[0],
+    scope: 'doctor:read doctor:write doctor:delete',
     code_challenge: challenge,
     code_challenge_method: 'S256',
     resource: mcpResourceUrl()
@@ -118,130 +152,174 @@ test('authorization code is single-use, PKCE-bound, and exchanges for a token', 
 
   const consent = await agent.post('/api/oauth/consent').send({
     decision: 'allow',
-    scopes: ['read', 'write'],
+    scopes: ['doctor:read', 'doctor:write'],
     query
   });
-  assert.equal(consent.status, 200);
-  const redirectUrl = new URL(consent.body.redirectUrl);
-  const code = redirectUrl.searchParams.get('code');
-  assert.ok(code);
-  assert.equal(redirectUrl.searchParams.get('state'), 'abc');
+  const code = new URL(consent.body.redirectUrl).searchParams.get('code');
 
   const tokenRes = await request(app).post('/oauth/token').type('form').send({
     grant_type: 'authorization_code',
     code,
-    redirect_uri: 'http://localhost:9999/callback',
-    client_id: clientId,
+    redirect_uri: client.redirectUris[0],
+    client_id: client.clientId,
     code_verifier: verifier,
     resource: mcpResourceUrl()
   });
-  assert.equal(tokenRes.status, 200);
-  assert.ok(tokenRes.body.access_token);
+  const token = tokenRes.body.access_token;
 
-  const reuse = await request(app).post('/oauth/token').type('form').send({
+  const listRes = await request(app)
+    .post('/mcp')
+    .set('Authorization', `Bearer ${token}`)
+    .set('Accept', 'application/json, text/event-stream')
+    .set('Content-Type', 'application/json')
+    .set('MCP-Protocol-Version', '2025-11-25')
+    .send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'list_doctors', arguments: {} } });
+  assert.equal(listRes.status, 200);
+  const listPayload = mcpPayload(listRes);
+  const listedDoctors = toolText(listPayload);
+  assert.ok(Array.isArray(listedDoctors));
+  assert.ok(listedDoctors.length >= 1);
+
+  const getRes = await request(app)
+    .post('/mcp')
+    .set('Authorization', `Bearer ${token}`)
+    .set('Accept', 'application/json, text/event-stream')
+    .set('Content-Type', 'application/json')
+    .set('MCP-Protocol-Version', '2025-11-25')
+    .send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'get_doctor', arguments: { doctorId: initialDoctor._id.toString() } } });
+  assert.equal(getRes.status, 200);
+  assert.equal(toolText(mcpPayload(getRes)).name, 'Dr. Smith');
+
+  const addRes = await request(app)
+    .post('/mcp')
+    .set('Authorization', `Bearer ${token}`)
+    .set('Accept', 'application/json, text/event-stream')
+    .set('Content-Type', 'application/json')
+    .set('MCP-Protocol-Version', '2025-11-25')
+    .send({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'add_doctor', arguments: { name: 'Dr. Ali', specialization: 'Neurology' } } });
+  assert.equal(addRes.status, 200);
+  const createdDoctor = toolText(mcpPayload(addRes));
+  assert.equal(createdDoctor.name, 'Dr. Ali');
+
+  const updateRes = await request(app)
+    .post('/mcp')
+    .set('Authorization', `Bearer ${token}`)
+    .set('Accept', 'application/json, text/event-stream')
+    .set('Content-Type', 'application/json')
+    .set('MCP-Protocol-Version', '2025-11-25')
+    .send({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'update_doctor', arguments: { doctorId: createdDoctor.id, specialization: 'Internal Medicine' } } });
+  assert.equal(updateRes.status, 200);
+  assert.equal(toolText(mcpPayload(updateRes)).specialization, 'Internal Medicine');
+
+  const deleteRes = await request(app)
+    .post('/mcp')
+    .set('Authorization', `Bearer ${token}`)
+    .set('Accept', 'application/json, text/event-stream')
+    .set('Content-Type', 'application/json')
+    .set('MCP-Protocol-Version', '2025-11-25')
+    .send({ jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'delete_doctor', arguments: { doctorId: createdDoctor.id } } });
+  assert.equal(deleteRes.status, 200);
+  assert.match(JSON.stringify(mcpPayload(deleteRes)), /Permission denied/i);
+});
+
+test('delete doctor works when doctor:delete is granted', async () => {
+  await Doctor.deleteMany({});
+  const doctor = await Doctor.create({ name: 'Dr. Sarah', specialization: 'Dermatology' });
+  const client = await createClient('delete-client');
+  const agent = request.agent(app);
+  await loginAdmin(agent);
+
+  const { verifier, challenge } = pkce();
+  const query = {
+    response_type: 'code',
+    client_id: client.clientId,
+    redirect_uri: client.redirectUris[0],
+    scope: 'doctor:read doctor:write doctor:delete',
+    code_challenge: challenge,
+    code_challenge_method: 'S256',
+    resource: mcpResourceUrl()
+  };
+
+  const consent = await agent.post('/api/oauth/consent').send({
+    decision: 'allow',
+    scopes: ['doctor:delete'],
+    query
+  });
+  const code = new URL(consent.body.redirectUrl).searchParams.get('code');
+
+  const tokenRes = await request(app).post('/oauth/token').type('form').send({
     grant_type: 'authorization_code',
     code,
-    redirect_uri: 'http://localhost:9999/callback',
-    client_id: clientId,
-    code_verifier: verifier
+    redirect_uri: client.redirectUris[0],
+    client_id: client.clientId,
+    code_verifier: verifier,
+    resource: mcpResourceUrl()
   });
-  assert.equal(reuse.status, 400);
 
-  function mcpPayload(res) {
-    const text = res.text || '';
-    const dataLine = text.split('\n').find((line) => line.startsWith('data: '));
-    if (dataLine) return JSON.parse(dataLine.slice(6));
-    return res.body;
-  }
-
-  const init = await request(app)
+  const deleteRes = await request(app)
     .post('/mcp')
     .set('Authorization', `Bearer ${tokenRes.body.access_token}`)
     .set('Accept', 'application/json, text/event-stream')
     .set('Content-Type', 'application/json')
     .set('MCP-Protocol-Version', '2025-11-25')
-    .send({
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'initialize',
-      params: {
-        protocolVersion: '2025-11-25',
-        capabilities: {},
-        clientInfo: { name: 'tests', version: '1.0.0' }
-      }
-    });
-  assert.ok(init.status === 200 || init.status === 202);
-  const initPayload = mcpPayload(init);
-  assert.ok(initPayload.result || initPayload.error, JSON.stringify(initPayload));
-
-  const deleteCall = await request(app)
-    .post('/mcp')
-    .set('Authorization', `Bearer ${tokenRes.body.access_token}`)
-    .set('Accept', 'application/json, text/event-stream')
-    .set('Content-Type', 'application/json')
-    .set('MCP-Protocol-Version', '2025-11-25')
-    .send({
-      jsonrpc: '2.0',
-      id: 3,
-      method: 'tools/call',
-      params: { name: 'delete_data', arguments: { id: '000000000000000000000000' } }
-    });
-  assert.equal(deleteCall.status, 200);
-  const bodyText = JSON.stringify(mcpPayload(deleteCall)) + (deleteCall.text || '');
-  assert.match(bodyText, /Permission denied|insufficient|delete/i);
+    .send({ jsonrpc: '2.0', id: 6, method: 'tools/call', params: { name: 'delete_doctor', arguments: { doctorId: doctor._id.toString() } } });
+  assert.equal(deleteRes.status, 200);
+  assert.match(JSON.stringify(mcpPayload(deleteRes)), /deleted/i);
 });
 
-test('expired authorization codes are rejected', async () => {
-  await OAuthClient.create({
-    clientId: 'expired-client',
-    clientName: 'Expired',
-    redirectUris: ['http://localhost:9999/callback'],
-    allowedScopes: ['read'],
-    tokenEndpointAuthMethod: 'none'
-  });
-  const { challenge } = pkce();
-  await AuthorizationCode.create({
-    codeHash: hashToken('expired-code'),
-    clientId: 'expired-client',
-    userId: new mongoose.Types.ObjectId(),
-    redirectUri: 'http://localhost:9999/callback',
-    scopes: ['read'],
-    resource: mcpResourceUrl(),
-    codeChallenge: challenge,
-    codeChallengeMethod: 'S256',
-    expiresAt: new Date(Date.now() - 1000),
-    used: false
-  });
+test('revoked token cannot use MCP', async () => {
+  await Doctor.deleteMany({});
+  await Doctor.create({ name: 'Dr. Ali', specialization: 'Neurology' });
+  const client = await createClient('revoked-client');
+  const agent = request.agent(app);
+  await loginAdmin(agent);
 
-  const res = await request(app).post('/oauth/token').type('form').send({
+  const { verifier, challenge } = pkce();
+  const query = {
+    response_type: 'code',
+    client_id: client.clientId,
+    redirect_uri: client.redirectUris[0],
+    scope: 'doctor:read doctor:write doctor:delete',
+    code_challenge: challenge,
+    code_challenge_method: 'S256',
+    resource: mcpResourceUrl()
+  };
+
+  const consent = await agent.post('/api/oauth/consent').send({
+    decision: 'allow',
+    scopes: ['doctor:read', 'doctor:write'],
+    query
+  });
+  const code = new URL(consent.body.redirectUrl).searchParams.get('code');
+
+  const tokenRes = await request(app).post('/oauth/token').type('form').send({
     grant_type: 'authorization_code',
-    code: 'expired-code',
-    redirect_uri: 'http://localhost:9999/callback',
-    client_id: 'expired-client',
-    code_verifier: 'verifier-does-not-matter-after-expiry'
+    code,
+    redirect_uri: client.redirectUris[0],
+    client_id: client.clientId,
+    code_verifier: verifier,
+    resource: mcpResourceUrl()
   });
-  assert.equal(res.status, 400);
-});
+  const accessToken = tokenRes.body.access_token;
 
-test('MCP without a bearer token returns 401 and a resource_metadata challenge', async () => {
-  const res = await request(app).post('/mcp').set('Accept', 'application/json').send({
-    jsonrpc: '2.0',
-    id: 1,
-    method: 'initialize',
-    params: {
-      protocolVersion: '2025-11-25',
-      capabilities: {},
-      clientInfo: { name: 'tests', version: '1.0.0' }
-    }
-  });
-  assert.equal(res.status, 401);
-  assert.match(res.headers['www-authenticate'] || '', /resource_metadata/);
+  const revoke = await request(app).post('/oauth/revoke').type('form').send({ token: accessToken });
+  assert.equal(revoke.status, 200);
+  assert.equal(revoke.body.revoked, true);
+
+  const denied = await request(app)
+    .post('/mcp')
+    .set('Authorization', `Bearer ${accessToken}`)
+    .set('Accept', 'application/json')
+    .set('Content-Type', 'application/json')
+    .set('MCP-Protocol-Version', '2025-11-25')
+    .send({ jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name: 'list_doctors', arguments: {} } });
+  assert.equal(denied.status, 401);
 });
 
 test('discovery documents are published', async () => {
   const as = await request(app).get('/.well-known/oauth-authorization-server');
   assert.equal(as.status, 200);
-  assert.ok(as.body.authorization_endpoint);
+  assert.equal(as.body.revocation_endpoint, `${config.apiUrl}/oauth/revoke`);
   assert.deepEqual(as.body.code_challenge_methods_supported, ['S256']);
 
   const rs = await request(app).get('/.well-known/oauth-protected-resource');

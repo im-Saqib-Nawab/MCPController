@@ -5,12 +5,17 @@ import { api, getErrorMessage } from '../services/api.js';
 
 export default function Dashboard({ user }) {
   const [connections, setConnections] = useState([]);
+  const [doctors, setDoctors] = useState([]);
   const [error, setError] = useState('');
 
   async function load() {
     try {
-      const { data } = await api.get('/connections');
-      setConnections(data.connections);
+      const [{ data: connectionData }, { data: doctorData }] = await Promise.all([
+        api.get('/connections'),
+        api.get('/doctors')
+      ]);
+      setConnections(connectionData.connections);
+      setDoctors(doctorData.doctors);
     } catch (err) {
       setError(getErrorMessage(err));
     }
@@ -21,30 +26,37 @@ export default function Dashboard({ user }) {
   }, []);
 
   async function revoke(clientId) {
-    await api.delete(`/connections/${encodeURIComponent(clientId)}`);
-    await load();
+    try {
+      await api.delete(`/connections/${encodeURIComponent(clientId)}`);
+      await load();
+    } catch (err) {
+      setError(getErrorMessage(err));
+    }
   }
 
   return (
     <main className="mx-auto max-w-5xl px-4 py-10">
-      <h1 className="text-2xl font-semibold text-slate-900">Welcome back</h1>
-      <p className="mt-1 text-slate-600">{user.name} · {user.email}</p>
+      <p className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">MCPController</p>
+      <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-900">Doctor Management</h1>
+      <p className="mt-2 text-slate-600">
+        {user.name} · {user.email}
+      </p>
 
       <section className="mt-8 rounded-xl border border-slate-200 bg-white p-5">
-        <h2 className="text-sm font-medium uppercase tracking-wide text-slate-500">Account</h2>
+        <h2 className="text-sm font-medium uppercase tracking-wide text-slate-500">Admin</h2>
         <dl className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
           <div>
-            <dt className="text-slate-500">Name</dt>
-            <dd className="font-medium text-slate-900">{user.name}</dd>
+            <dt className="text-slate-500">Status</dt>
+            <dd className="font-medium text-slate-900">Authenticated</dd>
           </div>
           <div>
-            <dt className="text-slate-500">Email</dt>
-            <dd className="font-medium text-slate-900">{user.email}</dd>
+            <dt className="text-slate-500">Role</dt>
+            <dd className="font-medium text-slate-900">Single Admin</dd>
           </div>
         </dl>
       </section>
 
-      <h2 className="mt-10 text-lg font-semibold text-slate-900">Connected Applications</h2>
+      <h2 className="mt-10 text-lg font-semibold text-slate-900">Connected Application</h2>
       {error ? <p className="mt-2 text-sm text-red-600">{error}</p> : null}
       <div className="mt-4 grid gap-4">
         {connections.length === 0 ? (
@@ -64,16 +76,40 @@ export default function Dashboard({ user }) {
                 </span>
               </div>
               <div className="mt-4">
-                <p className="mb-2 text-sm font-medium text-slate-700">Permissions</p>
+                <p className="mb-2 text-sm font-medium text-slate-700">Granted Permissions</p>
                 <PermissionCard scopes={connection.scopes} />
               </div>
               <div className="mt-5">
                 <Button variant="danger" onClick={() => revoke(connection.clientId)}>
-                  Manage Access
+                  Revoke Access
                 </Button>
               </div>
             </article>
           ))
+        )}
+      </div>
+
+      <h2 className="mt-10 text-lg font-semibold text-slate-900">Doctors</h2>
+      <div className="mt-4 overflow-hidden rounded-xl border border-slate-200 bg-white">
+        {doctors.length === 0 ? (
+          <p className="p-6 text-sm text-slate-500">No doctors found.</p>
+        ) : (
+          <table className="w-full text-left text-sm">
+            <thead className="border-b border-slate-200 bg-slate-50 text-slate-500">
+              <tr>
+                <th className="px-6 py-3 font-medium">Name</th>
+                <th className="px-6 py-3 font-medium">Specialization</th>
+              </tr>
+            </thead>
+            <tbody>
+              {doctors.map((doctor) => (
+                <tr key={doctor.id} className="border-b border-slate-100 last:border-b-0">
+                  <td className="px-6 py-4 font-medium text-slate-900">{doctor.name}</td>
+                  <td className="px-6 py-4 text-slate-600">{doctor.specialization}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         )}
       </div>
     </main>

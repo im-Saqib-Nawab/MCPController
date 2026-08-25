@@ -3,6 +3,15 @@ import { User } from '../models/User.js';
 import { config } from '../config/env.js';
 import { AppError } from '../middleware/error.middleware.js';
 
+/**
+ * Admin authentication (website session) is separate from MCP OAuth.
+ *
+ * Why a User document still exists:
+ * OAuth codes/tokens/connections need a stable resource-owner id. We keep one
+ * Admin User row in MongoDB, but credentials always come from .env — there is
+ * no public registration and no multi-user account system.
+ */
+
 export function setSessionCookie(res, user) {
   const token = jwt.sign(
     { sub: String(user._id), email: user.email },
@@ -29,21 +38,43 @@ export function clearSessionCookie(res) {
   });
 }
 
-export async function registerUser({ name, email, password }) {
-  const existing = await User.findOne({ email: email.toLowerCase() });
-  if (existing) {
-    throw new AppError(409, 'email_in_use', 'An account with this email already exists.');
-  }
-  const user = await User.create({ name, email, password });
-  return user.toObject();
-}
+/**
+ * Ensure the single Admin document exists and matches ADMIN_* from .env.
+ * Called on login so rotating the env password takes effect immediately.
+ */
+export async function ensureAdminUser() {
+  const email = config.adminEmail.toLowerCase().trim();
+  let user = await User.findOne({ email });
 
-export async function loginUser({ email, password }) {
-  const user = await User.findOne({ email: email.toLowerCase() }).select('+password');
-  if (!user || !(await user.comparePassword(password))) {
-    throw new AppError(401, 'invalid_credentials', 'Invalid email or password.');
+  if (!user) {
+    user = await User.create({
+      name: 'Admin',
+      email,
+      password: config.adminPassword
+    });
+  } else if (user.name !== 'Admin') {
+    user.name = 'Admin';
+    await user.save();
   }
+
   const safe = user.toObject();
   delete safe.password;
   return safe;
+}
+
+/**
+ * Login only succeeds for ADMIN_EMAIL + ADMIN_PASSWORD from .env.
+ * No other accounts can sign in.
+ */
+export async function loginAdmin({ email, password }) {
+  const expectedEmail = config.adminEmail.toLowerCase().trim();
+  const providedEmail = String(email || '')
+    .toLowerCase()
+    .trim();
+
+  if (providedEmail !== expectedEmail || password !== config.adminPassword) {
+    throw new AppError(401, 'invalid_credentials', 'Invalid email or password.');
+  }
+
+  return ensureAdminUser();
 }

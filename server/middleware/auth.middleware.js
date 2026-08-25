@@ -4,12 +4,12 @@ import { config } from '../config/env.js';
 import { AppError } from './error.middleware.js';
 
 /**
- * Dashboard/login authentication is separate from MCP OAuth.
+ * Admin dashboard/login authentication is separate from MCP OAuth.
  *
- * 1. The user logs in through the React UI.
- * 2. Express sets an HTTP-only cookie containing a JWT (user id + email).
+ * 1. The Admin logs in through the React UI (credentials from .env).
+ * 2. Express sets an HTTP-only cookie containing a JWT (admin user id + email).
  * 3. This middleware reads that cookie on /api/* routes such as /api/auth/me
- *    and /api/oauth/consent.
+ *    and /api/oauth/consent — so only the logged-in Admin can grant ChatGPT access.
  *
  * ChatGPT never uses this cookie. ChatGPT uses a Bearer access token on /mcp.
  */

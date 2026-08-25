@@ -10,11 +10,13 @@ const tokenLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 60,
   standardHeaders: true,
-  legacyHeaders: false
+  legacyHeaders: false,
+  skip: () => process.env.NODE_ENV === 'test'
 });
 
 router.post('/token', tokenLimiter, oauthController.token);
 router.post('/register', tokenLimiter, oauthController.register);
+router.post('/revoke', tokenLimiter, oauthController.revoke);
 
 // Only used in local development, when the React UI runs on Vite (APP_URL)
 // and Express runs on another origin (API_URL). In production they are the

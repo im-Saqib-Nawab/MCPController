@@ -4,10 +4,12 @@ import cors from 'cors';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import { config } from './config/env.js';
+import { connectDatabase } from './config/database.js';
 import { errorMiddleware, AppError } from './middleware/error.middleware.js';
 import authRoutes from './routes/auth.routes.js';
 import oauthRoutes, { oauthApiRouter } from './routes/oauth.routes.js';
 import connectionRoutes from './routes/connection.routes.js';
+import doctorRoutes from './routes/doctor.routes.js';
 import mcpRoutes from './routes/mcp.routes.js';
 import * as oauthController from './controllers/oauth.controller.js';
 
@@ -27,6 +29,18 @@ app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: false }));
 app.use(cookieParser());
 
+app.use(async (req, res, next) => {
+  if (/\.(?:js|css|map|ico|png|svg|woff2?)$/i.test(req.path)) {
+    return next();
+  }
+  try {
+    await connectDatabase();
+    next();
+  } catch (err) {
+    next(err);
+  }
+});
+
 const allowedOrigins = new Set([config.appUrl, config.apiUrl]);
 
 app.use(
@@ -38,6 +52,7 @@ app.use(
       req.path.startsWith('/.well-known') ||
       req.path.startsWith('/oauth/token') ||
       req.path.startsWith('/oauth/register') ||
+      req.path.startsWith('/oauth/revoke') ||
       req.path.startsWith('/mcp');
     if (open) {
       callback(null, { origin: true });
@@ -59,6 +74,7 @@ app.get('/api/health', (_req, res) => {
 
 app.use('/api/auth', authRoutes);
 app.use('/api/connections', connectionRoutes);
+app.use('/api/doctors', doctorRoutes);
 app.use('/api/oauth', oauthApiRouter);
 app.use('/oauth', oauthRoutes);
 app.use('/mcp', mcpRoutes);
@@ -76,16 +92,23 @@ app.use((err, req, res, next) => {
   next(err);
 });
 
-app.use(errorMiddleware);
-
 if (config.isProduction) {
   app.use(express.static(config.clientDist));
   app.get('/{*splat}', (req, res, next) => {
-    if (req.path.startsWith('/api') || req.path.startsWith('/mcp') || req.path.startsWith('/oauth/token')) {
+    if (
+      req.path.startsWith('/api') ||
+      req.path.startsWith('/mcp') ||
+      req.path.startsWith('/oauth/token') ||
+      req.path.startsWith('/oauth/revoke')
+    ) {
       return next();
     }
-    res.sendFile(path.join(config.clientDist, 'index.html'));
+    res.sendFile(path.join(config.clientDist, 'index.html'), (err) => {
+      if (err) next(err);
+    });
   });
 }
+
+app.use(errorMiddleware);
 
 export default app;

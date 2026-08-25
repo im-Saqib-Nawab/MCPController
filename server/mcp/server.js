@@ -1,11 +1,11 @@
 import { McpServer } from '@modelcontextprotocol/server';
 import * as z from 'zod/v4';
 import { config } from '../config/env.js';
-import { getProfileTool } from './tools/getProfile.tool.js';
-import { getDataTool } from './tools/getData.tool.js';
-import { createDataTool } from './tools/createData.tool.js';
-import { updateDataTool } from './tools/updateData.tool.js';
-import { deleteDataTool } from './tools/deleteData.tool.js';
+import { listDoctorsTool } from './tools/listDoctors.tool.js';
+import { getDoctorTool } from './tools/getDoctor.tool.js';
+import { addDoctorTool } from './tools/addDoctor.tool.js';
+import { updateDoctorTool } from './tools/updateDoctor.tool.js';
+import { deleteDoctorTool } from './tools/deleteDoctor.tool.js';
 
 function errorResult(err) {
   return {
@@ -36,61 +36,65 @@ export function buildMcpServer(authInfo) {
     name: config.mcpServerName,
     version: config.mcpServerVersion,
     instructions:
-      'MCPController practice tools. Use get_profile and get_data to read. Use create_data and update_data to write. delete_data requires the delete scope.'
+      'MCPController doctor tools. Use list_doctors and get_doctor to read doctor records. Use add_doctor and update_doctor to manage doctors. delete_doctor requires the doctor:delete scope.'
   });
 
   server.registerTool(
-    'get_profile',
+    'list_doctors',
     {
-      description: 'Return the authenticated user profile. Requires the read scope. Use this when the user asks who they are.',
+      description: 'List all doctors in MongoDB. Requires doctor:read.',
+      inputSchema: z.object({}),
       annotations: { readOnlyHint: true }
     },
-    wrap(getProfileTool(authInfo))
+    wrap(listDoctorsTool(authInfo))
   );
 
   server.registerTool(
-    'get_data',
+    'get_doctor',
     {
-      description: 'List the user\'s sample records from MongoDB. Requires the read scope.',
+      description: 'Return one doctor by doctorId. Requires doctor:read.',
+      inputSchema: z.object({
+        doctorId: z.string().min(1).describe('MongoDB id of the doctor')
+      }),
       annotations: { readOnlyHint: true }
     },
-    wrap(getDataTool(authInfo))
+    wrap(getDoctorTool(authInfo))
   );
 
   server.registerTool(
-    'create_data',
+    'add_doctor',
     {
-      description: 'Create a sample record in MongoDB. Requires the write scope.',
+      description: 'Create a new doctor. Requires doctor:write.',
       inputSchema: z.object({
-        title: z.string().min(1).describe('Short title for the record'),
-        content: z.string().optional().describe('Optional body text')
+        name: z.string().min(1).describe('Doctor name'),
+        specialization: z.string().min(1).describe('Doctor specialization')
       })
     },
-    wrap(createDataTool(authInfo))
+    wrap(addDoctorTool(authInfo))
   );
 
   server.registerTool(
-    'update_data',
+    'update_doctor',
     {
-      description: 'Update one of the user\'s sample records. Requires the write scope.',
+      description: 'Update an existing doctor. Requires doctor:write.',
       inputSchema: z.object({
-        id: z.string().min(1).describe('MongoDB id of the record'),
-        title: z.string().min(1).optional(),
-        content: z.string().optional()
+        doctorId: z.string().min(1).describe('MongoDB id of the doctor'),
+        name: z.string().min(1).optional(),
+        specialization: z.string().min(1).optional()
       })
     },
-    wrap(updateDataTool(authInfo))
+    wrap(updateDoctorTool(authInfo))
   );
 
   server.registerTool(
-    'delete_data',
+    'delete_doctor',
     {
-      description: 'Delete one of the user\'s sample records. Requires the delete scope.',
+      description: 'Delete a doctor. Requires doctor:delete.',
       inputSchema: z.object({
-        id: z.string().min(1).describe('MongoDB id of the record')
+        doctorId: z.string().min(1).describe('MongoDB id of the doctor')
       })
     },
-    wrap(deleteDataTool(authInfo))
+    wrap(deleteDoctorTool(authInfo))
   );
 
   return server;

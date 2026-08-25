@@ -13,7 +13,7 @@ const oauthClientSchema = new mongoose.Schema(
     // Hashed secret for confidential clients. Public clients (ChatGPT) use PKCE instead.
     clientSecretHash: { type: String, default: null },
     redirectUris: { type: [String], required: true },
-    allowedScopes: { type: [String], default: ['read', 'write', 'delete'] },
+    allowedScopes: { type: [String], default: ['doctor:read', 'doctor:write', 'doctor:delete'] },
     tokenEndpointAuthMethod: {
       type: String,
       enum: ['none', 'client_secret_post', 'client_secret_basic'],

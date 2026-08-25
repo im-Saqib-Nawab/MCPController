@@ -2,10 +2,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 import { connectDatabase, disconnectDatabase } from '../config/database.js';
-import { User } from '../models/User.js';
 import { OAuthClient } from '../models/OAuthClient.js';
-import { DataItem } from '../models/DataItem.js';
+import { Doctor } from '../models/Doctor.js';
 import { config } from '../config/env.js';
+import { ensureAdminUser } from '../services/auth.service.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 dotenv.config({ path: path.join(root, '.env') });
@@ -13,18 +13,9 @@ dotenv.config({ path: path.join(root, '.env') });
 async function seed() {
   await connectDatabase();
 
-  const email = 'test@example.com';
-  let user = await User.findOne({ email });
-  if (!user) {
-    user = await User.create({
-      name: 'Test User',
-      email,
-      password: 'password123'
-    });
-    console.log('Created demo user test@example.com');
-  } else {
-    console.log('Demo user already exists');
-  }
+  // Sync the single Admin document from ADMIN_EMAIL / ADMIN_PASSWORD (no demo users).
+  const admin = await ensureAdminUser();
+  console.log(`Admin ready: ${admin.email}`);
 
   const inspectorRedirects = [
     'http://localhost:6274/callback',
@@ -41,7 +32,7 @@ async function seed() {
       clientId: 'mcp-inspector',
       clientName: 'MCP Inspector',
       redirectUris: inspectorRedirects,
-      allowedScopes: ['read', 'write', 'delete'],
+      allowedScopes: ['doctor:read', 'doctor:write', 'doctor:delete'],
       tokenEndpointAuthMethod: 'none',
       grantTypes: ['authorization_code', 'refresh_token']
     },
@@ -49,13 +40,14 @@ async function seed() {
   );
   console.log('Upserted OAuth client mcp-inspector');
 
-  const count = await DataItem.countDocuments({ userId: user._id });
-  if (count === 0) {
-    await DataItem.create([
-      { userId: user._id, title: 'Welcome note', content: 'This record was created by npm run seed.' },
-      { userId: user._id, title: 'Practice item', content: 'Try get_data, update_data, and delete_data from ChatGPT.' }
+  const doctorCount = await Doctor.countDocuments();
+  if (doctorCount === 0) {
+    await Doctor.create([
+      { name: 'Dr. Smith', specialization: 'Cardiology' },
+      { name: 'Dr. Ali', specialization: 'Neurology' },
+      { name: 'Dr. Sarah', specialization: 'Dermatology' }
     ]);
-    console.log('Created sample data items');
+    console.log('Created sample doctors');
   }
 
   await disconnectDatabase();

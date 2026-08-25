@@ -30,10 +30,9 @@ export default function Login({ onLoggedIn }) {
   return (
     <main className="mx-auto flex min-h-[70vh] max-w-md flex-col justify-center px-4 py-12">
       <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h1 className="text-xl font-semibold text-slate-900">Log in</h1>
-        <p className="mt-1 text-sm text-slate-600">
-          Use the demo account from <code className="rounded bg-slate-100 px-1">npm run seed</code>.
-        </p>
+        <p className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">MCPController</p>
+        <h1 className="mt-2 text-2xl font-semibold tracking-tight text-slate-900">Admin login</h1>
+        <p className="mt-2 text-sm text-slate-600">Sign in with the single Admin account from your environment variables.</p>
         <form onSubmit={submit} className="mt-6 space-y-4">
           <label className="block text-sm">
             <span className="font-medium text-slate-700">Email</span>
@@ -60,9 +59,7 @@ export default function Login({ onLoggedIn }) {
             {loading ? 'Signing in…' : 'Login'}
           </Button>
         </form>
-        <p className="mt-4 text-xs text-slate-500">
-          Demo email is documented in the README. The password is not stored in this frontend.
-        </p>
+        <p className="mt-4 text-xs text-slate-500">No public registration is available.</p>
         <p className="mt-3 text-sm text-slate-500">
           <Link to="/" className="underline">
             Back home

@@ -5,7 +5,8 @@ import {
   exchangeToken,
   previewAuthorization,
   protectedResourceMetadata,
-  registerClient
+  registerClient,
+  revokeToken
 } from '../services/oauth.service.js';
 import { config } from '../config/env.js';
 import { AppError } from '../middleware/error.middleware.js';
@@ -30,6 +31,16 @@ export async function register(req, res, next) {
   try {
     const created = await registerClient(req.body || {});
     res.status(201).json(created);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function revoke(req, res, next) {
+  try {
+    const token = req.body?.token || req.body?.access_token || req.body?.refresh_token;
+    const result = await revokeToken(token);
+    res.json(result);
   } catch (err) {
     next(err);
   }

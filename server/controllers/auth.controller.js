@@ -1,11 +1,10 @@
 import { z } from 'zod';
-import { loginUser, registerUser, setSessionCookie, clearSessionCookie } from '../services/auth.service.js';
+import { loginAdmin, setSessionCookie, clearSessionCookie } from '../services/auth.service.js';
 import { AppError } from '../middleware/error.middleware.js';
 
 const credentialsSchema = z.object({
   email: z.string().email(),
-  password: z.string().min(8),
-  name: z.string().min(1).optional()
+  password: z.string().min(1)
 });
 
 function parseOrThrow(schema, data) {
@@ -16,23 +15,11 @@ function parseOrThrow(schema, data) {
   return result.data;
 }
 
-export async function register(req, res, next) {
-  try {
-    const parsed = parseOrThrow(credentialsSchema, { ...req.body, name: req.body.name || 'User' });
-    const user = await registerUser(parsed);
-    setSessionCookie(res, user);
-    res.status(201).json({
-      user: { id: user._id, name: user.name, email: user.email }
-    });
-  } catch (err) {
-    next(err);
-  }
-}
-
+/** Admin login only — credentials are compared to ADMIN_EMAIL / ADMIN_PASSWORD in .env. */
 export async function login(req, res, next) {
   try {
-    const parsed = parseOrThrow(credentialsSchema.pick({ email: true, password: true }), req.body);
-    const user = await loginUser(parsed);
+    const parsed = parseOrThrow(credentialsSchema, req.body);
+    const user = await loginAdmin(parsed);
     setSessionCookie(res, user);
     res.json({
       user: { id: user._id, name: user.name, email: user.email }

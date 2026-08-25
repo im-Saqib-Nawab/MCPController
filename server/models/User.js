@@ -1,6 +1,11 @@
 import mongoose from 'mongoose';
-import bcrypt from 'bcrypt';
+import bcrypt from 'bcryptjs';
 
+/**
+ * Represents the single Admin resource owner for OAuth (codes, tokens, connections).
+ * Login credentials themselves come from ADMIN_EMAIL / ADMIN_PASSWORD in .env —
+ * this collection is not a multi-user account registry.
+ */
 const userSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true },
