@@ -35,7 +35,8 @@ export async function issueTokens({ userId, clientId, scopes, resource }) {
     refresh_token: refreshToken,
     token_type: 'Bearer',
     expires_in: config.accessTokenTtlSeconds,
-    scope: scopes.join(' ')
+    scope: scopes.join(' '),
+    resource
   };
 }
 

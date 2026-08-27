@@ -9,6 +9,7 @@ import { OAuthClient } from '../server/models/OAuthClient.js';
 import { Doctor } from '../server/models/Doctor.js';
 import { hashToken } from '../server/services/token.service.js';
 import { config, mcpResourceUrl } from '../server/config/env.js';
+import { parseBasicAuthorization } from '../server/services/oauth.service.js';
 
 function pkce() {
   const verifier = crypto.randomBytes(32).toString('base64url');
@@ -65,6 +66,18 @@ before(async () => {
 
 after(async () => {
   await mongoose.disconnect();
+});
+
+test('parseBasicAuthorization keeps HTTPS CIMD client ids intact', () => {
+  const clientId = 'https://chatgpt.com/oauth/17UGM9VNiuZ2/client.json';
+  const unencoded = Buffer.from(`${clientId}:`).toString('base64');
+  assert.deepEqual(parseBasicAuthorization(`Basic ${unencoded}`), {
+    clientId,
+    clientSecret: ''
+  });
+
+  const encoded = Buffer.from(`${encodeURIComponent(clientId)}:`).toString('base64');
+  assert.equal(parseBasicAuthorization(`Basic ${encoded}`).clientId, clientId);
 });
 
 test('admin login works and registration is disabled', async () => {
@@ -386,6 +399,53 @@ test('unauthenticated MCP advertises all doctor scopes', async () => {
   assert.match(header, /doctor:read/);
   assert.match(header, /doctor:write/);
   assert.match(header, /doctor:delete/);
+});
+
+test('token exchange accepts ChatGPT CIMD client_id in HTTP Basic', async () => {
+  const clientId = 'https://chatgpt.com/oauth/17UGM9VNiuZ2/client.json';
+  const redirectUri = 'https://chatgpt.com/connector/oauth/17UGM9VNiuZ2';
+  const client = await createClient(clientId);
+  client.redirectUris = [redirectUri];
+  await client.save();
+
+  const agent = request.agent(app);
+  await loginAdmin(agent);
+  const { verifier, challenge } = pkce();
+  const query = {
+    response_type: 'code',
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    scope: 'doctor:read doctor:write',
+    code_challenge: challenge,
+    code_challenge_method: 'S256',
+    resource: mcpResourceUrl()
+  };
+
+  const consent = await agent.post('/api/oauth/consent').send({
+    decision: 'allow',
+    scopes: ['doctor:read', 'doctor:write'],
+    query
+  });
+  const code = new URL(consent.body.redirectUrl).searchParams.get('code');
+
+  const basic = Buffer.from(`${clientId}:`).toString('base64');
+  const tokenRes = await request(app)
+    .post('/oauth/token')
+    .set('Authorization', `Basic ${basic}`)
+    .set('Origin', 'https://chatgpt.com')
+    .type('form')
+    .send({
+      grant_type: 'authorization_code',
+      code,
+      redirect_uri: redirectUri,
+      code_verifier: verifier,
+      resource: [mcpResourceUrl(), `${mcpResourceUrl()}/`]
+    });
+
+  assert.equal(tokenRes.status, 200);
+  assert.equal(tokenRes.body.token_type, 'Bearer');
+  assert.equal(tokenRes.body.resource, mcpResourceUrl());
+  assert.ok(tokenRes.headers['access-control-allow-origin']);
 });
 
 test('discovery documents are published', async () => {

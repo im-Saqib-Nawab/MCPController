@@ -55,7 +55,7 @@ export default function Authorize() {
         scopes: selected,
         query
       });
-      window.location.assign(data.redirectUrl);
+      window.location.replace(data.redirectUrl);
     } catch (err) {
       setError(getErrorMessage(err));
     }

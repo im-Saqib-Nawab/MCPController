@@ -5,6 +5,7 @@ import {
   exchangeToken,
   previewAuthorization,
   protectedResourceMetadata,
+  queryFromConsent,
   registerClient,
   revokeToken
 } from '../services/oauth.service.js';
@@ -77,6 +78,8 @@ export async function consent(req, res, next) {
 }
 
 export async function token(req, res) {
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Pragma', 'no-cache');
   try {
     const tokens = await exchangeToken(req);
     res.json(tokens);

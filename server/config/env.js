@@ -50,7 +50,7 @@ export const config = {
   adminPassword: process.env.ADMIN_PASSWORD || 'change-this-password',
   jwtSecret: process.env.JWT_SECRET || 'dev-only-change-me',
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '7d',
-  authCodeTtlSeconds: Number(process.env.AUTH_CODE_TTL_SECONDS) || 120,
+  authCodeTtlSeconds: Number(process.env.AUTH_CODE_TTL_SECONDS) || 600,
   accessTokenTtlSeconds: Number(process.env.ACCESS_TOKEN_TTL_SECONDS) || 3600,
   refreshTokenTtlSeconds: Number(process.env.REFRESH_TOKEN_TTL_SECONDS) || 2592000,
   mcpServerName: process.env.MCP_SERVER_NAME || 'MCPController',

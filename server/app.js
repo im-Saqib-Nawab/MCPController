@@ -43,25 +43,62 @@ app.use(async (req, res, next) => {
 
 const allowedOrigins = new Set([config.appUrl, config.apiUrl]);
 
+function isOpenClientPath(req) {
+  const candidates = [req.originalUrl, req.url, req.path, req.headers['x-invoke-path']]
+    .filter(Boolean)
+    .map((value) => String(value).split('?')[0]);
+  return candidates.some(
+    (path) =>
+      path === '/api' ||
+      path === '/api/' ||
+      path.includes('/.well-known') ||
+      path.includes('/oauth/token') ||
+      path.includes('/oauth/register') ||
+      path.includes('/oauth/revoke') ||
+      /(^|\/)mcp(\/|$)/.test(path)
+  );
+}
+
+app.use((req, res, next) => {
+  if (typeof req.body === 'string' && req.body.length) {
+    const type = String(req.headers['content-type'] || '');
+    try {
+      if (type.includes('application/json')) {
+        req.body = JSON.parse(req.body);
+      } else if (type.includes('application/x-www-form-urlencoded')) {
+        req.body = Object.fromEntries(new URLSearchParams(req.body));
+      }
+    } catch {
+      // Leave the raw string; the token handler will return invalid_request.
+    }
+  }
+  next();
+});
+
 app.use(
   cors((req, callback) => {
     // Metadata, token, and MCP endpoints are called by MCP clients (not the
-    // React origin). They need permissive CORS. The dashboard API keeps a
-    // credentialed origin allow-list.
-    const open =
-      req.path.startsWith('/.well-known') ||
-      req.path.startsWith('/oauth/token') ||
-      req.path.startsWith('/oauth/register') ||
-      req.path.startsWith('/oauth/revoke') ||
-      req.path.startsWith('/mcp');
-    if (open) {
-      callback(null, { origin: true });
+    // React origin). They need permissive CORS even if Vercel rewrites the path.
+    if (isOpenClientPath(req)) {
+      callback(null, {
+        origin: true,
+        credentials: false,
+        methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+        allowedHeaders: [
+          'Content-Type',
+          'Authorization',
+          'Accept',
+          'MCP-Protocol-Version',
+          'mcp-session-id'
+        ],
+        maxAge: 86400
+      });
       return;
     }
     callback(null, {
       origin: (origin, cb) => {
         if (!origin || allowedOrigins.has(origin)) cb(null, true);
-        else cb(new Error('Not allowed by CORS'));
+        else cb(null, false);
       },
       credentials: true
     });

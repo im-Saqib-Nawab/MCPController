@@ -16,11 +16,12 @@ const oauthClientSchema = new mongoose.Schema(
     allowedScopes: { type: [String], default: ['doctor:read', 'doctor:write', 'doctor:delete'] },
     tokenEndpointAuthMethod: {
       type: String,
-      enum: ['none', 'client_secret_post', 'client_secret_basic'],
+      enum: ['none', 'client_secret_post', 'client_secret_basic', 'private_key_jwt'],
       default: 'none'
     },
     // When the client_id is an HTTPS URL (Client ID Metadata Document), we store it here.
     clientUri: { type: String, default: null },
+    jwksUri: { type: String, default: null },
     grantTypes: {
       type: [String],
       default: ['authorization_code', 'refresh_token']

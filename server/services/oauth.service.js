@@ -12,6 +12,7 @@ import {
   randomToken,
   rotateRefreshToken
 } from './token.service.js';
+import { clientIdFromJwt, verifyClientAssertion } from './client-assertion.js';
 
 export const SCOPE_LABELS = {
   'doctor:read': 'Read Doctors',
@@ -33,8 +34,123 @@ export function parseScopes(scope) {
   return requested.length ? requested : [...config.scopes];
 }
 
+function normalizeRedirectUri(uri) {
+  const value = String(uri || '').trim();
+  if (!value) return '';
+  try {
+    return new URL(value).toString();
+  } catch {
+    return value;
+  }
+}
+
 export function exactRedirectMatch(registered, candidate) {
-  return registered.some((uri) => uri === candidate);
+  const wanted = normalizeRedirectUri(candidate);
+  return registered.some((uri) => uri === candidate || normalizeRedirectUri(uri) === wanted);
+}
+
+export function firstString(value) {
+  if (Array.isArray(value)) return firstString(value[0]);
+  if (value == null || value === '') return undefined;
+  return String(value);
+}
+
+export function normalizePkceChallenge(value) {
+  return String(value || '')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+}
+
+function formDecode(value) {
+  try {
+    return decodeURIComponent(String(value).replace(/\+/g, ' '));
+  } catch {
+    return value;
+  }
+}
+
+/**
+ * ChatGPT's client_id is an HTTPS URL (CIMD). HTTP Basic splits on the first
+ * colon, so an unencoded `https://chatgpt.com/.../client.json:` becomes
+ * username `https` and a 400 invalid_client. RFC 6749 also form-encodes the
+ * username, which we decode here.
+ */
+export function parseBasicAuthorization(header) {
+  if (!header?.startsWith('Basic ')) return null;
+  const decoded = Buffer.from(header.slice(6).trim(), 'base64').toString('utf8');
+
+  let clientId;
+  let clientSecret = '';
+
+  if (/^https?:\/\//i.test(decoded)) {
+    const schemeEnd = decoded.indexOf('://') + 3;
+    const extraColon = decoded.indexOf(':', schemeEnd);
+    if (extraColon < 0) {
+      clientId = decoded;
+    } else {
+      const lastColon = decoded.lastIndexOf(':');
+      const secretPart = decoded.slice(lastColon + 1);
+      if (secretPart === '' || !secretPart.includes('/')) {
+        clientId = decoded.slice(0, lastColon);
+        clientSecret = secretPart;
+      } else {
+        clientId = decoded;
+      }
+    }
+  } else {
+    const sep = decoded.indexOf(':');
+    if (sep < 0) {
+      clientId = decoded;
+    } else {
+      clientId = decoded.slice(0, sep);
+      clientSecret = decoded.slice(sep + 1);
+    }
+  }
+
+  return { clientId: formDecode(clientId), clientSecret: formDecode(clientSecret) };
+}
+
+function stripSlash(value) {
+  return String(value || '').trim().replace(/\/$/, '');
+}
+
+export function canonicalResource(value) {
+  const mcp = stripSlash(mcpResourceUrl());
+  const issuer = stripSlash(issuerUrl());
+  if (!value) return mcp;
+  let normalized = stripSlash(value);
+  try {
+    normalized = stripSlash(decodeURIComponent(normalized));
+  } catch {
+    // Keep the raw value when it is not URI-encoded.
+  }
+  if (normalized === mcp || normalized === issuer || normalized === `${issuer}/mcp`) {
+    return mcp;
+  }
+  return normalized;
+}
+
+function sameResource(left, right) {
+  if (!left || !right) return false;
+  return canonicalResource(left) === canonicalResource(right);
+}
+
+export function isAllowedResource(value) {
+  if (!value) return true;
+  return canonicalResource(value) === stripSlash(mcpResourceUrl());
+}
+
+function cimdAuthMethod(metadata) {
+  const methods = []
+    .concat(metadata.token_endpoint_auth_method || [])
+    .concat(metadata.token_endpoint_auth_methods_supported || [])
+    .map(String);
+  // CIMD URL clients are public. We do not implement private_key_jwt, so PKCE
+  // (`none`) is the only method we persist — otherwise ChatGPT would later
+  // fail token exchange looking for a client secret we never issued.
+  if (methods.includes('none') || methods.length === 0) return 'none';
+  return 'none';
 }
 
 async function fetchClientIdMetadataDocument(clientId) {
@@ -51,25 +167,30 @@ async function fetchClientIdMetadataDocument(clientId) {
 
   const response = await fetch(clientId, {
     redirect: 'error',
-    signal: AbortSignal.timeout(5000),
-    headers: { accept: 'application/json' }
+    signal: AbortSignal.timeout(8000),
+    headers: {
+      accept: 'application/json',
+      'user-agent': 'MCPController/1.0'
+    }
   });
   if (!response.ok) return null;
   const metadata = await response.json();
-  if (!metadata || !Array.isArray(metadata.redirect_uris)) return null;
+  const redirectUris = metadata.redirect_uris || metadata.redirectUris;
+  if (!metadata || !Array.isArray(redirectUris) || redirectUris.length === 0) return null;
 
   return OAuthClient.findOneAndUpdate(
     { clientId },
     {
       clientId,
       clientName: metadata.client_name || metadata.clientName || 'MCP Client',
-      redirectUris: metadata.redirect_uris,
+      redirectUris,
       allowedScopes: config.scopes,
-      tokenEndpointAuthMethod: metadata.token_endpoint_auth_method || 'none',
+      tokenEndpointAuthMethod: cimdAuthMethod(metadata),
       clientUri: clientId,
+      jwksUri: metadata.jwks_uri || metadata.jwksUri || null,
       grantTypes: metadata.grant_types || ['authorization_code', 'refresh_token']
     },
-    { upsert: true, new: true }
+    { upsert: true, new: true, runValidators: true }
   );
 }
 
@@ -152,8 +273,8 @@ export function validateAuthorizeParams(query) {
     throw new AppError(400, 'invalid_request', 'code_challenge_method must be S256.');
   }
 
-  const resourceValue = resource || mcpResourceUrl();
-  if (resource && resource !== mcpResourceUrl()) {
+  const resourceValue = canonicalResource(resource || mcpResourceUrl());
+  if (resource && !isAllowedResource(resource)) {
     throw new AppError(
       400,
       'invalid_target',
@@ -162,11 +283,11 @@ export function validateAuthorizeParams(query) {
   }
 
   return {
-    clientId: client_id,
-    redirectUri: redirect_uri,
+    clientId: firstString(client_id),
+    redirectUri: firstString(redirect_uri),
     scopes: parseScopes(scope),
-    state,
-    codeChallenge: code_challenge,
+    state: firstString(state),
+    codeChallenge: normalizePkceChallenge(firstString(code_challenge)),
     codeChallengeMethod: 'S256',
     resource: resourceValue
   };
@@ -278,26 +399,30 @@ export async function revokeToken(token) {
 }
 
 function extractClientSecret(req) {
-  const header = req.headers.authorization;
-  if (header?.startsWith('Basic ')) {
-    const decoded = Buffer.from(header.slice(6), 'base64').toString('utf8');
-    const sep = decoded.indexOf(':');
-    return {
-      clientId: decoded.slice(0, sep),
-      clientSecret: decoded.slice(sep + 1)
-    };
+  const headerCreds = parseBasicAuthorization(req.headers.authorization);
+  if (headerCreds?.clientId) {
+    return headerCreds;
   }
   return {
-    clientId: req.body.client_id,
-    clientSecret: req.body.client_secret
+    clientId: firstString(req.body?.client_id),
+    clientSecret: firstString(req.body?.client_secret)
   };
 }
 
 async function authenticateOAuthClient(req, fallbackClientId = null) {
   const { clientId, clientSecret } = extractClientSecret(req);
   const resolvedClientId = clientId || fallbackClientId;
-  const client = await findClient(resolvedClientId);
-  if (client.tokenEndpointAuthMethod === 'none') {
+  let client;
+  try {
+    client = await findClient(resolvedClientId);
+  } catch (err) {
+    if (fallbackClientId && resolvedClientId !== fallbackClientId) {
+      client = await findClient(fallbackClientId);
+    } else {
+      throw err;
+    }
+  }
+  if (client.tokenEndpointAuthMethod === 'none' || !client.clientSecretHash) {
     return client;
   }
   if (!clientSecret || hashToken(clientSecret) !== client.clientSecretHash) {
@@ -307,11 +432,11 @@ async function authenticateOAuthClient(req, fallbackClientId = null) {
 }
 
 export async function exchangeToken(req) {
-  const grantType = req.body.grant_type;
+  const grantType = firstString(req.body?.grant_type);
 
   if (grantType === 'refresh_token') {
     await authenticateOAuthClient(req);
-    const tokens = await rotateRefreshToken(req.body.refresh_token);
+    const tokens = await rotateRefreshToken(firstString(req.body?.refresh_token));
     if (!tokens) {
       throw new AppError(400, 'invalid_grant', 'Token expired');
     }
@@ -322,20 +447,23 @@ export async function exchangeToken(req) {
     throw new AppError(400, 'unsupported_grant_type', 'Unsupported grant_type.');
   }
 
-  const { code, redirect_uri, code_verifier, resource } = req.body;
-  if (!code || !code_verifier) {
+  const code = firstString(req.body?.code);
+  const redirectUri = firstString(req.body?.redirect_uri);
+  const codeVerifier = firstString(req.body?.code_verifier) || firstString(req.body?.codeVerifier);
+  const resource = firstString(req.body?.resource);
+  if (!code || !codeVerifier) {
     throw new AppError(400, 'invalid_request', 'code and code_verifier are required.');
   }
 
   const record = await AuthorizationCode.findOne({ codeHash: hashToken(code) });
   if (!record) {
-    throw new AppError(400, 'invalid_authorization_code', 'Invalid authorization code');
+    throw new AppError(400, 'invalid_grant', 'Invalid authorization code');
   }
   if (record.used) {
-    throw new AppError(400, 'invalid_authorization_code', 'Authorization code has already been used.');
+    throw new AppError(400, 'invalid_grant', 'Authorization code has already been used.');
   }
   if (record.expiresAt.getTime() <= Date.now()) {
-    throw new AppError(400, 'invalid_authorization_code', 'Authorization code has expired.');
+    throw new AppError(400, 'invalid_grant', 'Authorization code has expired.');
   }
 
   const client = await authenticateOAuthClient(req, record.clientId);
@@ -343,16 +471,16 @@ export async function exchangeToken(req) {
     throw new AppError(400, 'invalid_grant', 'Authorization code does not belong to this client.');
   }
 
-  const resolvedRedirectUri = redirect_uri || record.redirectUri;
+  const resolvedRedirectUri = redirectUri || record.redirectUri;
   if (record.redirectUri !== resolvedRedirectUri) {
     throw new AppError(400, 'invalid_grant', 'redirect_uri does not match the authorization request.');
   }
-  if (resource && resource !== record.resource) {
+  if (resource && !sameResource(resource, record.resource)) {
     throw new AppError(400, 'invalid_target', 'resource does not match the authorization request.');
   }
 
-  const expected = pkceChallengeFromVerifier(code_verifier);
-  if (expected !== record.codeChallenge) {
+  const expected = normalizePkceChallenge(pkceChallengeFromVerifier(codeVerifier));
+  if (expected !== normalizePkceChallenge(record.codeChallenge)) {
     throw new AppError(400, 'invalid_grant', 'PKCE verification failed.');
   }
 

@@ -12,6 +12,10 @@
       "destination": "/api"
     },
     {
+      "source": "/oauth/token/",
+      "destination": "/api"
+    },
+    {
       "source": "/oauth/register",
       "destination": "/api"
     },
@@ -21,6 +25,10 @@
     },
     {
       "source": "/mcp",
+      "destination": "/api"
+    },
+    {
+      "source": "/mcp/",
       "destination": "/api"
     },
     {
