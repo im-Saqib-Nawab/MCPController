@@ -1,15 +1,41 @@
 import axios from 'axios';
 
-/**
- * The React app never receives JWT_SECRET, MongoDB URIs, or OAuth client secrets.
- * It talks to same-origin /api routes. Vite proxies them in development; Express
- * serves them in production.
+/*
+ * The browser only talks to the public API paths.
+ *
+ * Development:
+ *   Vite -> /api -> Express
+ *
+ * Production:
+ *   Express serves both React and /api from the same origin.
+ *
+ * Secrets such as JWT_SECRET, MONGODB_URI and ADMIN_PASSWORD
+ * must NEVER be exposed here.
  */
 export const api = axios.create({
   baseURL: '/api',
-  withCredentials: true
+  withCredentials: true,
+  headers: {
+    Accept: 'application/json'
+  }
 });
 
 export function getErrorMessage(error) {
-  return error.response?.data?.message || error.response?.data?.error_description || error.message;
+  if (error?.response?.data?.message) {
+    return error.response.data.message;
+  }
+
+  if (error?.response?.data?.error_description) {
+    return error.response.data.error_description;
+  }
+
+  if (error?.response?.data?.error) {
+    return error.response.data.error;
+  }
+
+  if (error?.message) {
+    return error.message;
+  }
+
+  return 'An unexpected error occurred.';
 }

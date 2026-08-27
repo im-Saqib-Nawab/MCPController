@@ -1,32 +1,93 @@
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
+
 import * as oauthController from '../controllers/oauth.controller.js';
+
 import { requireUser } from '../middleware/auth.middleware.js';
+
 import { config } from '../config/env.js';
 
 const router = Router();
 
-const tokenLimiter = rateLimit({
+const oauthLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  limit: 60,
+  limit: 100,
   standardHeaders: true,
   legacyHeaders: false,
-  skip: () => process.env.NODE_ENV === 'test'
+
+  skip: () =>
+    process.env.NODE_ENV === 'test'
 });
 
-router.post('/token', tokenLimiter, oauthController.token);
-router.post('/register', tokenLimiter, oauthController.register);
-router.post('/revoke', tokenLimiter, oauthController.revoke);
+/*
+ * OAuth token endpoint.
+ *
+ * This must remain publicly reachable because ChatGPT
+ * calls it directly after receiving the authorization code.
+ */
+router.post(
+  '/token',
+  oauthLimiter,
+  oauthController.token
+);
 
-// Only used in local development, when the React UI runs on Vite (APP_URL)
-// and Express runs on another origin (API_URL). In production they are the
-// same origin, so GET /oauth/authorize is the React page served as the SPA.
-if (config.appUrl !== config.apiUrl) {
-  router.get('/authorize', oauthController.authorizeBridge);
+/*
+ * Dynamic Client Registration.
+ */
+router.post(
+  '/register',
+  oauthLimiter,
+  oauthController.register
+);
+
+/*
+ * Token revocation.
+ */
+router.post(
+  '/revoke',
+  oauthLimiter,
+  oauthController.revoke
+);
+
+/*
+ * Local development only:
+ *
+ * Express API:
+ *   http://localhost:3000/oauth/authorize
+ *
+ * React/Vite:
+ *   http://localhost:5173/oauth/authorize
+ *
+ * In production both are normally the same origin.
+ */
+if (
+  config.appUrl !==
+  config.apiUrl
+) {
+  router.get(
+    '/authorize',
+    oauthController.authorizeBridge
+  );
 }
 
 export default router;
 
-export const oauthApiRouter = Router();
-oauthApiRouter.get('/request', requireUser, oauthController.preview);
-oauthApiRouter.post('/consent', requireUser, oauthController.consent);
+/*
+ * Internal API used by the React consent UI.
+ *
+ * These routes DO require the admin's logged-in session.
+ */
+export const oauthApiRouter =
+  Router();
+
+oauthApiRouter.get(
+  '/request',
+  requireUser,
+  oauthController.preview
+);
+
+oauthApiRouter.post(
+  '/consent',
+  requireUser,
+  oauthController.consent
+);

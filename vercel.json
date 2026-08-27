@@ -4,7 +4,7 @@
   "outputDirectory": "client/dist",
   "rewrites": [
     {
-      "source": "/api/(.*)",
+      "source": "/api/:path*",
       "destination": "/api"
     },
     {
@@ -32,16 +32,8 @@
       "destination": "/api"
     },
     {
-      "source": "/.well-known/(.*)",
+      "source": "/.well-known/:path*",
       "destination": "/api"
-    },
-    {
-      "source": "/(dashboard|login|oauth/authorize|oauth/success|connections|profile)",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/",
-      "destination": "/index.html"
     }
   ],
   "functions": {
