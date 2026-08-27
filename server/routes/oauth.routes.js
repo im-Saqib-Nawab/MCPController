@@ -5,9 +5,11 @@ import * as oauthController from '../controllers/oauth.controller.js';
 
 import { requireUser } from '../middleware/auth.middleware.js';
 
-import { config } from '../config/env.js';
-
 const router = Router();
+
+/* -------------------------------------------------------------------------- */
+/* Rate limiting                                                              */
+/* -------------------------------------------------------------------------- */
 
 const oauthLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -19,11 +21,45 @@ const oauthLimiter = rateLimit({
     process.env.NODE_ENV === 'test'
 });
 
+/* -------------------------------------------------------------------------- */
+/* OAuth Authorization Endpoint                                               */
+/* -------------------------------------------------------------------------- */
+
 /*
- * OAuth token endpoint.
+ * ChatGPT calls:
  *
- * This must remain publicly reachable because ChatGPT
- * calls it directly after receiving the authorization code.
+ * GET /oauth/authorize
+ *
+ * Example:
+ *
+ * /oauth/authorize
+ *   ?response_type=code
+ *   &client_id=...
+ *   &redirect_uri=...
+ *   &scope=...
+ *   &code_challenge=...
+ *   &code_challenge_method=S256
+ *   &resource=...
+ *   &state=...
+ *
+ * This route MUST exist in production.
+ *
+ * Do not conditionally register it based on APP_URL/API_URL because
+ * in production both normally use the same origin.
+ */
+router.get(
+  '/authorize',
+  oauthController.authorizeBridge
+);
+
+/* -------------------------------------------------------------------------- */
+/* OAuth Token Endpoint                                                       */
+/* -------------------------------------------------------------------------- */
+
+/*
+ * ChatGPT calls this endpoint after the user approves access.
+ *
+ * POST /oauth/token
  */
 router.post(
   '/token',
@@ -31,8 +67,12 @@ router.post(
   oauthController.token
 );
 
+/* -------------------------------------------------------------------------- */
+/* Dynamic Client Registration                                                */
+/* -------------------------------------------------------------------------- */
+
 /*
- * Dynamic Client Registration.
+ * POST /oauth/register
  */
 router.post(
   '/register',
@@ -40,8 +80,12 @@ router.post(
   oauthController.register
 );
 
+/* -------------------------------------------------------------------------- */
+/* Token Revocation                                                           */
+/* -------------------------------------------------------------------------- */
+
 /*
- * Token revocation.
+ * POST /oauth/revoke
  */
 router.post(
   '/revoke',
@@ -49,43 +93,32 @@ router.post(
   oauthController.revoke
 );
 
-/*
- * Local development only:
- *
- * Express API:
- *   http://localhost:3000/oauth/authorize
- *
- * React/Vite:
- *   http://localhost:5173/oauth/authorize
- *
- * In production both are normally the same origin.
- */
-if (
-  config.appUrl !==
-  config.apiUrl
-) {
-  router.get(
-    '/authorize',
-    oauthController.authorizeBridge
-  );
-}
-
 export default router;
 
-/*
- * Internal API used by the React consent UI.
- *
- * These routes DO require the admin's logged-in session.
- */
-export const oauthApiRouter =
-  Router();
+/* -------------------------------------------------------------------------- */
+/* Internal OAuth API                                                         */
+/* -------------------------------------------------------------------------- */
 
+/*
+ * These endpoints are used by the React admin consent UI.
+ *
+ * They require the administrator to already be logged in.
+ */
+
+export const oauthApiRouter = Router();
+
+/*
+ * Preview OAuth authorization request.
+ */
 oauthApiRouter.get(
   '/request',
   requireUser,
   oauthController.preview
 );
 
+/*
+ * Approve OAuth authorization request.
+ */
 oauthApiRouter.post(
   '/consent',
   requireUser,

@@ -8,6 +8,14 @@
       "destination": "/api"
     },
     {
+      "source": "/oauth/authorize",
+      "destination": "/api"
+    },
+    {
+      "source": "/oauth/authorize/",
+      "destination": "/api"
+    },
+    {
       "source": "/oauth/token",
       "destination": "/api"
     },
@@ -20,7 +28,15 @@
       "destination": "/api"
     },
     {
+      "source": "/oauth/register/",
+      "destination": "/api"
+    },
+    {
       "source": "/oauth/revoke",
+      "destination": "/api"
+    },
+    {
+      "source": "/oauth/revoke/",
       "destination": "/api"
     },
     {
