@@ -31,6 +31,18 @@ export const SCOPE_LABELS = {
 /* Helpers                                                                    */
 /* -------------------------------------------------------------------------- */
 
+export function firstString(value) {
+  if (Array.isArray(value)) {
+    return firstString(value[0]);
+  }
+
+  if (value === undefined || value === null || value === '') {
+    return undefined;
+  }
+
+  return String(value);
+}
+
 export function parseScopes(scope) {
   if (!scope) {
     return [...config.scopes];
@@ -73,7 +85,7 @@ function normalizeRedirectUri(uri) {
   try {
     return new URL(value).toString();
   } catch {
-    return value;
+    return '';
   }
 }
 
@@ -84,23 +96,13 @@ export function exactRedirectMatch(registered, candidate) {
 
   const wanted = normalizeRedirectUri(candidate);
 
+  if (!wanted) {
+    return false;
+  }
+
   return registered.some(
-    (uri) =>
-      uri === candidate ||
-      normalizeRedirectUri(uri) === wanted
+    (uri) => normalizeRedirectUri(uri) === wanted
   );
-}
-
-export function firstString(value) {
-  if (Array.isArray(value)) {
-    return firstString(value[0]);
-  }
-
-  if (value == null || value === '') {
-    return undefined;
-  }
-
-  return String(value);
 }
 
 export function normalizePkceChallenge(value) {
@@ -116,7 +118,7 @@ function formDecode(value) {
       String(value).replace(/\+/g, ' ')
     );
   } catch {
-    return value;
+    return String(value);
   }
 }
 
@@ -127,22 +129,17 @@ function stripSlash(value) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* HTTP Basic / OAuth client authentication                                   */
+/* HTTP Basic client authentication                                           */
 /* -------------------------------------------------------------------------- */
 
 /**
- * OAuth Basic authentication normally has:
- *
- * Authorization: Basic base64(client_id:client_secret)
- *
- * ChatGPT/CIMD client IDs can themselves be HTTPS URLs.
+ * OAuth clients may use HTTPS URL client IDs (e.g., CIMD clients).
  *
  * Example:
+ *   https://chatgpt.com/.well-known/client.json
  *
- * https://chatgpt.com/.well-known/client.json
- *
- * The URL contains ":" characters, therefore blindly splitting on ":"
- * is incorrect.
+ * Therefore we cannot blindly split the decoded Basic credentials at the
+ * first colon.
  */
 export function parseBasicAuthorization(header) {
   if (!header) {
@@ -155,13 +152,16 @@ export function parseBasicAuthorization(header) {
     return null;
   }
 
+  const encoded = value.replace(/^Basic\s+/i, '').trim();
+
+  if (!encoded) {
+    return null;
+  }
+
   let decoded;
 
   try {
-    decoded = Buffer.from(
-      value.replace(/^Basic\s+/i, '').trim(),
-      'base64'
-    ).toString('utf8');
+    decoded = Buffer.from(encoded, 'base64').toString('utf8');
   } catch {
     return null;
   }
@@ -171,33 +171,21 @@ export function parseBasicAuthorization(header) {
   }
 
   /*
-   * If the decoded value starts with an HTTPS URL, find the separator
-   * colon only after the URL authority/path has been considered.
+   * Standard Basic authentication is:
+   *   client_id:client_secret
    *
-   * For public CIMD clients ChatGPT normally sends no meaningful secret.
+   * A URL client_id contains ':' itself, so locate the separator by
+   * determining whether the complete decoded value is a valid URL first.
    */
   if (/^https?:\/\//i.test(decoded)) {
     try {
       const url = new URL(decoded);
 
-      /*
-       * If the whole decoded value is a valid URL, treat it as the
-       * client_id. This handles:
-       *
-       * Basic base64("https://chatgpt.com/client.json")
-       */
       return {
         clientId: formDecode(url.toString()),
         clientSecret: ''
       };
     } catch {
-      /*
-       * It may actually be:
-       *
-       * https://example.com/client.json:secret
-       *
-       * Remove the final ":secret" only if the prefix is a valid URL.
-       */
       const lastColon = decoded.lastIndexOf(':');
 
       if (lastColon > 8) {
@@ -217,7 +205,7 @@ export function parseBasicAuthorization(header) {
             };
           }
         } catch {
-          // Continue below.
+          // Fallthrough to standard separator splitting below.
         }
       }
     }
@@ -257,7 +245,7 @@ export function canonicalResource(value) {
       decodeURIComponent(normalized)
     );
   } catch {
-    // Keep original value.
+    // Keep raw value.
   }
 
   if (
@@ -294,7 +282,7 @@ export function isAllowedResource(value) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* CIMD                                                                       */
+/* CIMD (Client ID Metadata Document)                                         */
 /* -------------------------------------------------------------------------- */
 
 function cimdAuthMethod(metadata) {
@@ -303,10 +291,6 @@ function cimdAuthMethod(metadata) {
     .concat(metadata?.token_endpoint_auth_methods_supported || [])
     .map(String);
 
-  /*
-   * ChatGPT's CIMD client is treated as a public client.
-   * PKCE is therefore used instead of a client secret.
-   */
   if (methods.includes('none')) {
     return 'none';
   }
@@ -373,9 +357,6 @@ async function fetchClientIdMetadataDocument(clientId) {
     return null;
   }
 
-  /*
-   * Validate every redirect URI.
-   */
   const normalizedRedirectUris = [];
 
   for (const redirectUri of redirectUris) {
@@ -491,7 +472,8 @@ export async function registerClient(body = {}) {
           typeof uri === 'string' &&
           uri.trim()
       )
-      .map(normalizeRedirectUri);
+      .map(normalizeRedirectUri)
+      .filter(Boolean);
 
   if (!normalizedRedirectUris.length) {
     throw new AppError(
@@ -526,8 +508,7 @@ export async function registerClient(body = {}) {
 
   if (authMethod !== 'none') {
     clientSecret = randomToken();
-    clientSecretHash =
-      hashToken(clientSecret);
+    clientSecretHash = hashToken(clientSecret);
   }
 
   const client = await OAuthClient.create({
@@ -570,33 +551,18 @@ export async function registerClient(body = {}) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Authorization request                                                     */
+/* Authorization request                                                      */
 /* -------------------------------------------------------------------------- */
 
 export function validateAuthorizeParams(query = {}) {
-  const responseType =
-    firstString(query.response_type);
-
-  const clientId =
-    firstString(query.client_id);
-
-  const redirectUri =
-    firstString(query.redirect_uri);
-
-  const scope =
-    firstString(query.scope);
-
-  const state =
-    firstString(query.state);
-
-  const codeChallenge =
-    firstString(query.code_challenge);
-
-  const codeChallengeMethod =
-    firstString(query.code_challenge_method);
-
-  const resource =
-    firstString(query.resource);
+  const responseType = firstString(query.response_type);
+  const clientId = firstString(query.client_id);
+  const redirectUri = firstString(query.redirect_uri);
+  const scope = firstString(query.scope);
+  const state = firstString(query.state);
+  const codeChallenge = firstString(query.code_challenge);
+  const codeChallengeMethod = firstString(query.code_challenge_method);
+  const resource = firstString(query.resource);
 
   if (responseType !== 'code') {
     throw new AppError(
@@ -622,9 +588,6 @@ export function validateAuthorizeParams(query = {}) {
     );
   }
 
-  /*
-   * OAuth 2.1 / MCP authorization flow requires PKCE.
-   */
   if (!codeChallenge) {
     throw new AppError(
       400,
@@ -676,18 +639,13 @@ export function validateAuthorizeParams(query = {}) {
 
     state,
 
-    codeChallenge:
-      normalizePkceChallenge(
-        codeChallenge
-      ),
+    codeChallenge: normalizePkceChallenge(codeChallenge),
 
     codeChallengeMethod: 'S256',
 
-    resource:
-      canonicalResource(
-        resource ||
-          mcpResourceUrl()
-      )
+    resource: canonicalResource(
+      resource || mcpResourceUrl()
+    )
   };
 }
 
@@ -695,14 +653,9 @@ export function validateAuthorizeParams(query = {}) {
 /* Authorization preview                                                     */
 /* -------------------------------------------------------------------------- */
 
-export async function previewAuthorization(
-  query
-) {
-  const params =
-    validateAuthorizeParams(query);
-
-  const client =
-    await findClient(params.clientId);
+export async function previewAuthorization(query) {
+  const params = validateAuthorizeParams(query);
+  const client = await findClient(params.clientId);
 
   if (
     !exactRedirectMatch(
@@ -717,10 +670,9 @@ export async function previewAuthorization(
     );
   }
 
-  const offered =
-    config.scopes.filter((scope) =>
-      client.allowedScopes.includes(scope)
-    );
+  const offered = config.scopes.filter((scope) =>
+    client.allowedScopes.includes(scope)
+  );
 
   return {
     client: {
@@ -739,19 +691,14 @@ export async function previewAuthorization(
         params.scopes.includes(value)
     })),
 
-    redirectUri:
-      params.redirectUri,
-
-    state:
-      params.state,
-
-    resource:
-      params.resource
+    redirectUri: params.redirectUri,
+    state: params.state,
+    resource: params.resource
   };
 }
 
 /* -------------------------------------------------------------------------- */
-/* Authorization code                                                        */
+/* Authorization code                                                         */
 /* -------------------------------------------------------------------------- */
 
 export async function createAuthorizationCode({
@@ -767,11 +714,8 @@ export async function createAuthorizationCode({
     );
   }
 
-  const params =
-    validateAuthorizeParams(query);
-
-  const client =
-    await findClient(params.clientId);
+  const params = validateAuthorizeParams(query);
+  const client = await findClient(params.clientId);
 
   if (
     !exactRedirectMatch(
@@ -786,17 +730,15 @@ export async function createAuthorizationCode({
     );
   }
 
-  const requestedScopes =
-    Array.isArray(grantedScopes)
-      ? grantedScopes
-      : params.scopes;
+  const requestedScopes = Array.isArray(grantedScopes)
+    ? grantedScopes
+    : params.scopes;
 
-  const scopes =
-    requestedScopes.filter(
-      (scope) =>
-        config.scopes.includes(scope) &&
-        client.allowedScopes.includes(scope)
-    );
+  const scopes = requestedScopes.filter(
+    (scope) =>
+      config.scopes.includes(scope) &&
+      client.allowedScopes.includes(scope)
+  );
 
   if (!scopes.length) {
     throw new AppError(
@@ -809,35 +751,17 @@ export async function createAuthorizationCode({
   const code = randomToken();
 
   await AuthorizationCode.create({
-    codeHash:
-      hashToken(code),
-
-    clientId:
-      client.clientId,
-
-    userId:
-      user._id,
-
-    redirectUri:
-      params.redirectUri,
-
+    codeHash: hashToken(code),
+    clientId: client.clientId,
+    userId: user._id,
+    redirectUri: params.redirectUri,
     scopes,
-
-    resource:
-      params.resource,
-
-    codeChallenge:
-      params.codeChallenge,
-
-    codeChallengeMethod:
-      'S256',
-
-    expiresAt:
-      new Date(
-        Date.now() +
-          config.authCodeTtlSeconds * 1000
-      ),
-
+    resource: params.resource,
+    codeChallenge: params.codeChallenge,
+    codeChallengeMethod: 'S256',
+    expiresAt: new Date(
+      Date.now() + config.authCodeTtlSeconds * 1000
+    ),
     used: false
   });
 
@@ -859,41 +783,27 @@ export async function createAuthorizationCode({
     }
   );
 
-  const redirect =
-    new URL(params.redirectUri);
+  const redirect = new URL(params.redirectUri);
 
-  redirect.searchParams.set(
-    'code',
-    code
-  );
+  redirect.searchParams.set('code', code);
 
   if (params.state) {
-    redirect.searchParams.set(
-      'state',
-      params.state
-    );
+    redirect.searchParams.set('state', params.state);
   }
 
   return {
-    redirectUrl:
-      redirect.toString(),
-
+    redirectUrl: redirect.toString(),
     code
   };
 }
 
 /* -------------------------------------------------------------------------- */
-/* Deny authorization                                                        */
+/* Deny authorization                                                         */
 /* -------------------------------------------------------------------------- */
 
-export async function denyAuthorization(
-  query
-) {
-  const params =
-    validateAuthorizeParams(query);
-
-  const client =
-    await findClient(params.clientId);
+export async function denyAuthorization(query) {
+  const params = validateAuthorizeParams(query);
+  const client = await findClient(params.clientId);
 
   if (
     !exactRedirectMatch(
@@ -908,24 +818,16 @@ export async function denyAuthorization(
     );
   }
 
-  const redirect =
-    new URL(params.redirectUri);
+  const redirect = new URL(params.redirectUri);
 
-  redirect.searchParams.set(
-    'error',
-    'access_denied'
-  );
+  redirect.searchParams.set('error', 'access_denied');
 
   if (params.state) {
-    redirect.searchParams.set(
-      'state',
-      params.state
-    );
+    redirect.searchParams.set('state', params.state);
   }
 
   return {
-    redirectUrl:
-      redirect.toString()
+    redirectUrl: redirect.toString()
   };
 }
 
@@ -934,25 +836,17 @@ export async function denyAuthorization(
 /* -------------------------------------------------------------------------- */
 
 function extractClientCredentials(req) {
-  const basic =
-    parseBasicAuthorization(
-      req.headers.authorization
-    );
+  const basic = parseBasicAuthorization(
+    req.headers.authorization
+  );
 
   if (basic?.clientId) {
     return basic;
   }
 
   return {
-    clientId:
-      firstString(
-        req.body?.client_id
-      ),
-
-    clientSecret:
-      firstString(
-        req.body?.client_secret
-      ) || ''
+    clientId: firstString(req.body?.client_id),
+    clientSecret: firstString(req.body?.client_secret) || ''
   };
 }
 
@@ -960,18 +854,9 @@ async function authenticateOAuthClient(
   req,
   expectedClientId = null
 ) {
-  const {
-    clientId,
-    clientSecret
-  } = extractClientCredentials(req);
+  const { clientId, clientSecret } = extractClientCredentials(req);
 
-  /*
-   * If the request contains a client_id, use it.
-   * Otherwise the authorization code's client ID may be used.
-   */
-  const resolvedClientId =
-    clientId ||
-    expectedClientId;
+  const resolvedClientId = clientId || expectedClientId;
 
   if (!resolvedClientId) {
     throw new AppError(
@@ -981,15 +866,8 @@ async function authenticateOAuthClient(
     );
   }
 
-  const client =
-    await findClient(
-      resolvedClientId
-    );
+  const client = await findClient(resolvedClientId);
 
-  /*
-   * Never allow an explicitly supplied client_id
-   * to silently become another client.
-   */
   if (
     expectedClientId &&
     client.clientId !== expectedClientId
@@ -1002,8 +880,7 @@ async function authenticateOAuthClient(
   }
 
   if (
-    client.tokenEndpointAuthMethod ===
-      'none' ||
+    client.tokenEndpointAuthMethod === 'none' ||
     !client.clientSecretHash
   ) {
     return client;
@@ -1011,8 +888,7 @@ async function authenticateOAuthClient(
 
   if (
     !clientSecret ||
-    hashToken(clientSecret) !==
-      client.clientSecretHash
+    hashToken(clientSecret) !== client.clientSecretHash
   ) {
     throw new AppError(
       401,
@@ -1029,18 +905,12 @@ async function authenticateOAuthClient(
 /* -------------------------------------------------------------------------- */
 
 export async function exchangeToken(req) {
-  const grantType =
-    firstString(
-      req.body?.grant_type
-    );
+  const grantType = firstString(req.body?.grant_type);
 
   /* ------------------------------ refresh -------------------------------- */
 
   if (grantType === 'refresh_token') {
-    const refreshToken =
-      firstString(
-        req.body?.refresh_token
-      );
+    const refreshToken = firstString(req.body?.refresh_token);
 
     if (!refreshToken) {
       throw new AppError(
@@ -1050,13 +920,9 @@ export async function exchangeToken(req) {
       );
     }
 
-    const client =
-      await authenticateOAuthClient(req);
+    const client = await authenticateOAuthClient(req);
 
-    const tokens =
-      await rotateRefreshToken(
-        refreshToken
-      );
+    const tokens = await rotateRefreshToken(refreshToken);
 
     if (!tokens) {
       throw new AppError(
@@ -1066,13 +932,6 @@ export async function exchangeToken(req) {
       );
     }
 
-    /*
-     * IMPORTANT:
-     * Your rotateRefreshToken() should ideally return clientId.
-     *
-     * If it does not, the token service should be updated so a refresh
-     * token can never be used by another OAuth client.
-     */
     if (
       tokens.clientId &&
       tokens.clientId !== client.clientId
@@ -1097,28 +956,12 @@ export async function exchangeToken(req) {
     );
   }
 
-  const code =
-    firstString(
-      req.body?.code
-    );
-
-  const redirectUri =
-    firstString(
-      req.body?.redirect_uri
-    );
-
+  const code = firstString(req.body?.code);
+  const redirectUri = firstString(req.body?.redirect_uri);
   const codeVerifier =
-    firstString(
-      req.body?.code_verifier
-    ) ||
-    firstString(
-      req.body?.codeVerifier
-    );
-
-  const resource =
-    firstString(
-      req.body?.resource
-    );
+    firstString(req.body?.code_verifier) ||
+    firstString(req.body?.codeVerifier);
+  const resource = firstString(req.body?.resource);
 
   if (!code) {
     throw new AppError(
@@ -1136,11 +979,9 @@ export async function exchangeToken(req) {
     );
   }
 
-  const record =
-    await AuthorizationCode.findOne({
-      codeHash:
-        hashToken(code)
-    });
+  const record = await AuthorizationCode.findOne({
+    codeHash: hashToken(code)
+  });
 
   if (!record) {
     throw new AppError(
@@ -1158,10 +999,7 @@ export async function exchangeToken(req) {
     );
   }
 
-  if (
-    record.expiresAt.getTime() <=
-    Date.now()
-  ) {
+  if (record.expiresAt.getTime() <= Date.now()) {
     throw new AppError(
       400,
       'invalid_grant',
@@ -1169,17 +1007,11 @@ export async function exchangeToken(req) {
     );
   }
 
-  const client =
-    await authenticateOAuthClient(
-      req,
-      record.clientId
-    );
+  const client = await authenticateOAuthClient(
+    req,
+    record.clientId
+  );
 
-  /*
-   * redirect_uri is REQUIRED if it was included in the
-   * authorization request. We stored it, therefore require
-   * an exact match here.
-   */
   if (
     !redirectUri ||
     redirectUri !== record.redirectUri
@@ -1191,9 +1023,6 @@ export async function exchangeToken(req) {
     );
   }
 
-  /*
-   * Verify it is still registered for the same client.
-   */
   if (
     !exactRedirectMatch(
       client.redirectUris,
@@ -1209,10 +1038,7 @@ export async function exchangeToken(req) {
 
   if (
     resource &&
-    !sameResource(
-      resource,
-      record.resource
-    )
+    !sameResource(resource, record.resource)
   ) {
     throw new AppError(
       400,
@@ -1221,17 +1047,13 @@ export async function exchangeToken(req) {
     );
   }
 
-  const expected =
-    normalizePkceChallenge(
-      pkceChallengeFromVerifier(
-        codeVerifier
-      )
-    );
+  const expected = normalizePkceChallenge(
+    pkceChallengeFromVerifier(codeVerifier)
+  );
 
-  const actual =
-    normalizePkceChallenge(
-      record.codeChallenge
-    );
+  const actual = normalizePkceChallenge(
+    record.codeChallenge
+  );
 
   if (expected !== actual) {
     throw new AppError(
@@ -1241,44 +1063,26 @@ export async function exchangeToken(req) {
     );
   }
 
-  /*
-   * Authorization codes are single-use.
-   */
   record.used = true;
   await record.save();
 
   return issueTokens({
-    userId:
-      record.userId,
-
-    clientId:
-      record.clientId,
-
-    scopes:
-      record.scopes,
-
-    resource:
-      record.resource
+    userId: record.userId,
+    clientId: record.clientId,
+    scopes: record.scopes,
+    resource: record.resource
   });
 }
 
 /* -------------------------------------------------------------------------- */
-/* Revocation                                                                */
+/* Revocation                                                                 */
 /* -------------------------------------------------------------------------- */
 
-export async function revokeToken(
-  req
-) {
+export async function revokeToken(req) {
   const token =
-    firstString(
-      req.body?.token
-    ) ||
-    firstString(
-      req.body?.access_token
-    ) ||
-    firstString(
-      req.body?.refresh_token
-    );
+    firstString(req.body?.token) ||
+    firstString(req.body?.access_token) ||
+    firstString(req.body?.refresh_token);
 
   if (!token) {
     throw new AppError(
@@ -1288,53 +1092,33 @@ export async function revokeToken(
     );
   }
 
-  const client =
-    await authenticateOAuthClient(req);
+  const client = await authenticateOAuthClient(req);
+  const tokenHash = hashToken(token);
 
-  const tokenHash =
-    hashToken(token);
+  const record = await AccessToken.findOne({
+    $or: [
+      { tokenHash },
+      { refreshTokenHash: tokenHash }
+    ]
+  });
 
-  const record =
-    await AccessToken.findOne({
-      $or: [
-        { tokenHash },
-        { refreshTokenHash: tokenHash }
-      ]
-    });
-
-  /*
-   * OAuth revocation should not reveal whether a token exists.
-   * But if a record exists for another client, don't revoke it.
-   */
   if (!record) {
-    return {
-      revoked: false
-    };
+    return { revoked: false };
   }
 
-  if (
-    record.clientId !==
-    client.clientId
-  ) {
-    return {
-      revoked: false
-    };
+  if (record.clientId !== client.clientId) {
+    return { revoked: false };
   }
 
   record.revoked = true;
   await record.save();
 
   await Connection.deleteOne({
-    userId:
-      record.userId,
-
-    clientId:
-      record.clientId
+    userId: record.userId,
+    clientId: record.clientId
   });
 
-  return {
-    revoked: true
-  };
+  return { revoked: true };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1342,32 +1126,25 @@ export async function revokeToken(
 /* -------------------------------------------------------------------------- */
 
 export function authorizationServerMetadata() {
-  const issuer =
-    issuerUrl();
+  const issuer = issuerUrl();
 
   return {
     issuer,
 
-    authorization_endpoint:
-      `${config.appUrl}/oauth/authorize`,
+    authorization_endpoint: `${config.appUrl}/oauth/authorize`,
 
-    token_endpoint:
-      `${issuer}/oauth/token`,
+    token_endpoint: `${issuer}/oauth/token`,
 
-    registration_endpoint:
-      `${issuer}/oauth/register`,
+    registration_endpoint: `${issuer}/oauth/register`,
 
-    revocation_endpoint:
-      `${issuer}/oauth/revoke`,
+    revocation_endpoint: `${issuer}/oauth/revoke`,
 
     scopes_supported: [
       ...config.scopes,
       'offline_access'
     ],
 
-    response_types_supported: [
-      'code'
-    ],
+    response_types_supported: ['code'],
 
     grant_types_supported: [
       'authorization_code',
@@ -1380,9 +1157,7 @@ export function authorizationServerMetadata() {
       'client_secret_basic'
     ],
 
-    code_challenge_methods_supported: [
-      'S256'
-    ],
+    code_challenge_methods_supported: ['S256'],
 
     revocation_endpoint_auth_methods_supported: [
       'none',
@@ -1390,34 +1165,24 @@ export function authorizationServerMetadata() {
       'client_secret_basic'
     ],
 
-    client_id_metadata_document_supported:
-      true
+    client_id_metadata_document_supported: true
   };
 }
 
 export function protectedResourceMetadata() {
-  const resource =
-    mcpResourceUrl();
-
-  const issuer =
-    issuerUrl();
+  const resource = mcpResourceUrl();
+  const issuer = issuerUrl();
 
   return {
     resource,
 
-    authorization_servers: [
-      issuer
-    ],
+    authorization_servers: [issuer],
 
-    bearer_methods_supported: [
-      'header'
-    ],
+    bearer_methods_supported: ['header'],
 
-    scopes_supported:
-      [...config.scopes],
+    scopes_supported: [...config.scopes],
 
-    resource_documentation:
-      `${config.appUrl}/`
+    resource_documentation: `${config.appUrl}/`
   };
 }
 
@@ -1431,19 +1196,12 @@ export function oauthErrorRedirect(
   state
 ) {
   try {
-    const url =
-      new URL(redirectUri);
+    const url = new URL(redirectUri);
 
-    url.searchParams.set(
-      'error',
-      error
-    );
+    url.searchParams.set('error', error);
 
     if (state) {
-      url.searchParams.set(
-        'state',
-        state
-      );
+      url.searchParams.set('state', state);
     }
 
     return url.toString();

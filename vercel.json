@@ -2,11 +2,13 @@
   "installCommand": "npm install --include=dev",
   "buildCommand": "npm run build",
   "outputDirectory": "client/dist",
+
   "rewrites": [
     {
       "source": "/api/:path*",
       "destination": "/api"
     },
+
     {
       "source": "/oauth/authorize",
       "destination": "/api"
@@ -15,6 +17,7 @@
       "source": "/oauth/authorize/",
       "destination": "/api"
     },
+
     {
       "source": "/oauth/token",
       "destination": "/api"
@@ -23,6 +26,7 @@
       "source": "/oauth/token/",
       "destination": "/api"
     },
+
     {
       "source": "/oauth/register",
       "destination": "/api"
@@ -31,6 +35,7 @@
       "source": "/oauth/register/",
       "destination": "/api"
     },
+
     {
       "source": "/oauth/revoke",
       "destination": "/api"
@@ -39,6 +44,7 @@
       "source": "/oauth/revoke/",
       "destination": "/api"
     },
+
     {
       "source": "/mcp",
       "destination": "/api"
@@ -46,12 +52,9 @@
     {
       "source": "/mcp/",
       "destination": "/api"
-    },
-    {
-      "source": "/.well-known/:path*",
-      "destination": "/api"
     }
   ],
+
   "functions": {
     "api/index.js": {
       "includeFiles": "client/dist/**",

@@ -1,8 +1,6 @@
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
-
 import * as oauthController from '../controllers/oauth.controller.js';
-
 import { requireUser } from '../middleware/auth.middleware.js';
 
 const router = Router();
@@ -16,111 +14,35 @@ const oauthLimiter = rateLimit({
   limit: 100,
   standardHeaders: true,
   legacyHeaders: false,
-
-  skip: () =>
-    process.env.NODE_ENV === 'test'
+  skip: () => process.env.NODE_ENV === 'test'
 });
 
 /* -------------------------------------------------------------------------- */
-/* OAuth Authorization Endpoint                                               */
+/* Public OAuth 2.0 Protocol Endpoints                                        */
 /* -------------------------------------------------------------------------- */
 
-/*
- * ChatGPT calls:
- *
- * GET /oauth/authorize
- *
- * Example:
- *
- * /oauth/authorize
- *   ?response_type=code
- *   &client_id=...
- *   &redirect_uri=...
- *   &scope=...
- *   &code_challenge=...
- *   &code_challenge_method=S256
- *   &resource=...
- *   &state=...
- *
- * This route MUST exist in production.
- *
- * Do not conditionally register it based on APP_URL/API_URL because
- * in production both normally use the same origin.
- */
-router.get(
-  '/authorize',
-  oauthController.authorizeBridge
-);
+// Public: ChatGPT/MCP client initiates authorization
+router.get('/authorize', oauthController.authorizeBridge);
 
-/* -------------------------------------------------------------------------- */
-/* OAuth Token Endpoint                                                       */
-/* -------------------------------------------------------------------------- */
+// Public: Code exchange validated via PKCE inside service
+router.post('/token', oauthLimiter, oauthController.token);
 
-/*
- * ChatGPT calls this endpoint after the user approves access.
- *
- * POST /oauth/token
- */
-router.post(
-  '/token',
-  oauthLimiter,
-  oauthController.token
-);
+// Public: Dynamic Client Registration
+router.post('/register', oauthLimiter, oauthController.register);
 
-/* -------------------------------------------------------------------------- */
-/* Dynamic Client Registration                                                */
-/* -------------------------------------------------------------------------- */
-
-/*
- * POST /oauth/register
- */
-router.post(
-  '/register',
-  oauthLimiter,
-  oauthController.register
-);
-
-/* -------------------------------------------------------------------------- */
-/* Token Revocation                                                           */
-/* -------------------------------------------------------------------------- */
-
-/*
- * POST /oauth/revoke
- */
-router.post(
-  '/revoke',
-  oauthLimiter,
-  oauthController.revoke
-);
+// Public: Token Revocation
+router.post('/revoke', oauthLimiter, oauthController.revoke);
 
 export default router;
 
 /* -------------------------------------------------------------------------- */
-/* Internal OAuth API                                                         */
+/* Internal Admin API (Session Cookie Authenticated)                           */
 /* -------------------------------------------------------------------------- */
-
-/*
- * These endpoints are used by the React admin consent UI.
- *
- * They require the administrator to already be logged in.
- */
 
 export const oauthApiRouter = Router();
 
-/*
- * Preview OAuth authorization request.
- */
-oauthApiRouter.get(
-  '/request',
-  requireUser,
-  oauthController.preview
-);
+// Internal: Fetch OAuth request metadata for React Consent UI
+oauthApiRouter.get('/request', requireUser, oauthController.preview);
 
-/*
- * Approve OAuth authorization request.
- */
-oauthApiRouter.post(
-  '/consent',
-  requireUser,
-  oauthController.consent
-);
+// Internal: Admin approves or denies scope access
+oauthApiRouter.post('/consent', requireUser, oauthController.consent);

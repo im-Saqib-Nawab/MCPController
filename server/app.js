@@ -1,198 +1,126 @@
-import express from 'express';
 import path from 'node:path';
+import fs from 'node:fs';
+
+import express from 'express';
+import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import helmet from 'helmet';
-import cookieParser from 'cookie-parser';
 
-import { config } from './config/env.js';
 import { connectDatabase } from './config/database.js';
-
-import {
-  errorMiddleware,
-  AppError
-} from './middleware/error.middleware.js';
+import { config } from './config/env.js';
 
 import authRoutes from './routes/auth.routes.js';
+import connectionRoutes from './routes/connection.routes.js';
+import doctorRoutes from './routes/doctor.routes.js';
+import mcpRoutes from './routes/mcp.routes.js';
 import oauthRoutes, {
   oauthApiRouter
 } from './routes/oauth.routes.js';
 
-import connectionRoutes from './routes/connection.routes.js';
-import doctorRoutes from './routes/doctor.routes.js';
-import mcpRoutes from './routes/mcp.routes.js';
+import {
+  metadata as oauthMetadata,
+  resourceMetadata
+} from './controllers/oauth.controller.js';
 
-import * as oauthController from './controllers/oauth.controller.js';
+import { errorMiddleware } from './middleware/error.middleware.js';
 
 const app = express();
 
-app.set(
-  'trust proxy',
-  1
-);
+/* -------------------------------------------------------------------------- */
+/* Trust Proxy                                                                */
+/* -------------------------------------------------------------------------- */
+
+if (config.isProduction) {
+  app.set('trust proxy', 1);
+}
 
 /* -------------------------------------------------------------------------- */
-/* Security                                                                   */
+/* Security Headers                                                           */
 /* -------------------------------------------------------------------------- */
 
 app.use(
   helmet({
     contentSecurityPolicy: false,
-
-    /*
-     * OAuth authorization can be opened by ChatGPT
-     * in a browser context.
-     */
     crossOriginOpenerPolicy: false,
-
-    crossOriginResourcePolicy: {
-      policy: 'cross-origin'
-    }
+    crossOriginResourcePolicy: { policy: 'cross-origin' }
   })
 );
 
 /* -------------------------------------------------------------------------- */
-/* Body parsers                                                               */
+/* CORS Configuration                                                         */
 /* -------------------------------------------------------------------------- */
 
-app.use(
-  express.json({
-    limit: '1mb'
-  })
+const allowedOrigins = new Set(
+  [
+    config.appUrl,
+    config.apiUrl,
+    'http://localhost:5173',
+    'http://127.0.0.1:5173'
+  ].filter(Boolean)
 );
-
-app.use(
-  express.urlencoded({
-    extended: false
-  })
-);
-
-app.use(
-  cookieParser()
-);
-
-/* -------------------------------------------------------------------------- */
-/* Database                                                                   */
-/* -------------------------------------------------------------------------- */
-
-/*
- * Static files do not need a database connection.
- *
- * Everything else gets a database connection before
- * reaching the route.
- */
-app.use(
-  async (req, res, next) => {
-    if (
-      /\.(?:js|css|map|ico|png|jpg|jpeg|gif|svg|webp|woff2?|ttf)$/i.test(
-        req.path
-      )
-    ) {
-      return next();
-    }
-
-    try {
-      await connectDatabase();
-      return next();
-    } catch (err) {
-      return next(err);
-    }
-  }
-);
-
-/* -------------------------------------------------------------------------- */
-/* CORS                                                                      */
-/* -------------------------------------------------------------------------- */
-
-const allowedOrigins =
-  new Set(
-    [
-      config.appUrl,
-      config.apiUrl
-    ]
-      .filter(Boolean)
-      .map(String)
-  );
 
 function isOAuthOrMcpEndpoint(req) {
-  const path =
-    String(
-      req.path || ''
-    );
-
+  const pathname = String(req.path || '');
   return (
-    path === '/mcp' ||
-    path.startsWith('/mcp/') ||
-
-    path === '/oauth/token' ||
-    path === '/oauth/register' ||
-    path === '/oauth/revoke' ||
-    path === '/oauth/authorize' ||
-
-    path ===
-      '/.well-known/oauth-authorization-server' ||
-
-    path ===
-      '/.well-known/openid-configuration' ||
-
-    path ===
-      '/.well-known/oauth-protected-resource' ||
-
-    path.startsWith(
-      '/.well-known/oauth-protected-resource/'
-    )
+    pathname === '/mcp' ||
+    pathname.startsWith('/mcp/') ||
+    pathname === '/oauth/token' ||
+    pathname === '/oauth/register' ||
+    pathname === '/oauth/revoke' ||
+    pathname === '/oauth/authorize' ||
+    pathname === '/.well-known/oauth-authorization-server' ||
+    pathname === '/.well-known/openid-configuration' ||
+    pathname === '/.well-known/oauth-protected-resource' ||
+    pathname.startsWith('/.well-known/oauth-protected-resource/')
   );
 }
 
 app.use(
   cors((req, callback) => {
-    const origin =
-      req.headers.origin;
+    const origin = req.headers.origin;
 
     /*
-     * MCP/OAuth endpoints are consumed by external
-     * clients such as ChatGPT.
+     * External clients (ChatGPT, MCP clients, curl, server-to-server)
      */
-    if (
-      isOAuthOrMcpEndpoint(req)
-    ) {
+    if (isOAuthOrMcpEndpoint(req) || !origin) {
       return callback(null, {
         origin: true,
         credentials: false,
-
-        methods: [
-          'GET',
-          'POST',
-          'OPTIONS'
-        ],
-
+        methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
         allowedHeaders: [
           'Content-Type',
           'Authorization',
           'Accept',
+          'Origin',
+          'X-Requested-With',
           'MCP-Protocol-Version',
           'Mcp-Protocol-Version',
           'mcp-session-id'
         ],
-
         exposedHeaders: [
           'WWW-Authenticate',
-          'Mcp-Session-Id'
+          'Mcp-Session-Id',
+          'MCP-Protocol-Version'
         ],
-
         maxAge: 86400
       });
     }
 
     /*
-     * Normal React/API requests.
+     * Internal React Dashboard / API requests
      */
-    if (
-      !origin ||
-      allowedOrigins.has(origin)
-    ) {
+    if (allowedOrigins.has(origin)) {
       return callback(null, {
         origin: true,
-        credentials: true
+        credentials: true,
+        methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+        allowedHeaders: [
+          'Content-Type',
+          'Authorization',
+          'Accept',
+          'Origin',
+          'X-Requested-With'
+        ]
       });
     }
 
@@ -204,165 +132,180 @@ app.use(
 );
 
 /* -------------------------------------------------------------------------- */
-/* Routes                                                                     */
+/* Request Body & Cookie Parsing                                              */
 /* -------------------------------------------------------------------------- */
 
-app.get(
-  '/api/health',
-  (_req, res) => {
-    res.json({
-      ok: true,
+app.use(
+  express.urlencoded({
+    extended: false,
+    limit: '100kb'
+  })
+);
 
-      name:
-        config.mcpServerName,
+app.use(
+  express.json({
+    limit: '100kb'
+  })
+);
 
-      version:
-        config.mcpServerVersion
-    });
+app.use(cookieParser());
+
+/* -------------------------------------------------------------------------- */
+/* Database Middleware (Runs before all routes)                                */
+/* -------------------------------------------------------------------------- */
+
+app.use(async (req, _res, next) => {
+  /*
+   * Bypass DB connection check for static assets.
+   */
+  if (
+    /\.(?:js|css|map|ico|png|jpg|jpeg|gif|svg|webp|woff2?|ttf)$/i.test(
+      req.path
+    )
+  ) {
+    return next();
   }
-);
 
-app.use(
-  '/api/auth',
-  authRoutes
-);
-
-app.use(
-  '/api/connections',
-  connectionRoutes
-);
-
-app.use(
-  '/api/doctors',
-  doctorRoutes
-);
-
-app.use(
-  '/api/oauth',
-  oauthApiRouter
-);
-
-app.use(
-  '/oauth',
-  oauthRoutes
-);
-
-app.use(
-  '/mcp',
-  mcpRoutes
-);
+  try {
+    await connectDatabase();
+    next();
+  } catch (err) {
+    next(err);
+  }
+});
 
 /* -------------------------------------------------------------------------- */
-/* OAuth / MCP discovery                                                      */
+/* Health Check Endpoint                                                      */
+/* -------------------------------------------------------------------------- */
+
+app.get('/health', (_req, res) => {
+  res.status(200).json({
+    ok: true,
+    service: config.mcpServerName,
+    version: config.mcpServerVersion,
+    environment: config.nodeEnv
+  });
+});
+
+app.get('/api/health', (_req, res) => {
+  res.status(200).json({
+    ok: true,
+    name: config.mcpServerName,
+    version: config.mcpServerVersion
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* OAuth / MCP Discovery Endpoints                                            */
 /* -------------------------------------------------------------------------- */
 
 app.get(
   '/.well-known/oauth-authorization-server',
-  oauthController.metadata
+  oauthMetadata
 );
 
 app.get(
   '/.well-known/openid-configuration',
-  oauthController.metadata
+  oauthMetadata
 );
 
 app.get(
   '/.well-known/oauth-protected-resource',
-  oauthController.resourceMetadata
+  resourceMetadata
 );
 
 app.get(
   '/.well-known/oauth-protected-resource/mcp',
-  oauthController.resourceMetadata
+  resourceMetadata
 );
 
 /* -------------------------------------------------------------------------- */
-/* Zod errors                                                                 */
+/* Application & OAuth Routes                                                 */
 /* -------------------------------------------------------------------------- */
 
-app.use(
-  (err, req, res, next) => {
-    if (
-      err?.name ===
-      'ZodError'
-    ) {
-      return next(
-        new AppError(
-          400,
-          'invalid_request',
-          'Validation failed',
-          err.issues
-        )
-      );
-    }
+app.use('/api/auth', authRoutes);
+app.use('/api/connections', connectionRoutes);
+app.use('/api/doctors', doctorRoutes);
+app.use('/api/oauth', oauthApiRouter);
 
-    return next(err);
+app.use('/oauth', oauthRoutes);
+app.use('/mcp', mcpRoutes);
+
+/* -------------------------------------------------------------------------- */
+/* Root Route                                                                 */
+/* -------------------------------------------------------------------------- */
+
+app.get('/', (_req, res) => {
+  if (!config.isProduction) {
+    return res.json({
+      name: config.mcpServerName,
+      version: config.mcpServerVersion,
+      status: 'running'
+    });
   }
-);
+
+  return res.sendFile(path.join(config.clientDist, 'index.html'));
+});
 
 /* -------------------------------------------------------------------------- */
-/* Production SPA                                                             */
+/* Production Static Files & SPA Fallback                                      */
 /* -------------------------------------------------------------------------- */
 
-if (config.isProduction) {
+if (fs.existsSync(config.clientDist)) {
   app.use(
-    express.static(
-      config.clientDist
-    )
-  );
-
-  app.get(
-    '/{*splat}',
-    (req, res, next) => {
-      const requestPath =
-        String(
-          req.path || ''
-        );
-
-      /*
-       * NEVER send index.html for these routes.
-       *
-       * Otherwise ChatGPT can receive HTML where it expects
-       * JSON from OAuth/MCP endpoints.
-       */
-      const isBackendRoute =
-        requestPath === '/mcp' ||
-        requestPath.startsWith('/mcp/') ||
-
-        requestPath.startsWith('/api/') ||
-
-        requestPath === '/oauth' ||
-        requestPath.startsWith('/oauth/') ||
-
-        requestPath.startsWith(
-          '/.well-known/'
-        );
-
-      if (isBackendRoute) {
-        return next();
-      }
-
-      return res.sendFile(
-        path.join(
-          config.clientDist,
-          'index.html'
-        ),
-        (err) => {
-          if (err) {
-            next(err);
-          }
-        }
-      );
-    }
+    express.static(config.clientDist, {
+      index: false,
+      fallthrough: true,
+      maxAge: config.isProduction ? '1h' : 0
+    })
   );
 }
 
+app.get('*', (req, res, next) => {
+  const pathname = req.path;
+
+  /*
+   * Express 5 & path-to-regexp safe wildcard handler.
+   * Ensures backend routes never serve index.html.
+   */
+  if (
+    pathname.startsWith('/api/') ||
+    pathname === '/api' ||
+    pathname.startsWith('/oauth/') ||
+    pathname === '/oauth' ||
+    pathname === '/mcp' ||
+    pathname.startsWith('/mcp/') ||
+    pathname.startsWith('/.well-known/')
+  ) {
+    return next();
+  }
+
+  const indexFile = path.join(config.clientDist, 'index.html');
+
+  if (!fs.existsSync(indexFile)) {
+    return next();
+  }
+
+  return res.sendFile(indexFile, (err) => {
+    if (err) {
+      next(err);
+    }
+  });
+});
+
 /* -------------------------------------------------------------------------- */
-/* Error handler                                                              */
+/* Error Handlers                                                             */
 /* -------------------------------------------------------------------------- */
 
-app.use(
-  errorMiddleware
-);
+/* 404 Catch-All Handler */
+app.use((req, res) => {
+  res.status(404).json({
+    error: 'not_found',
+    message: `Route not found: ${req.method} ${req.path}`
+  });
+});
+
+/* Central Error Handler */
+app.use(errorMiddleware);
 
 export default app;

@@ -1,22 +1,33 @@
 /**
- * Vercel serverless entry. The entire Express app (API, OAuth, MCP, React
- * production files) is one function so the project deploys as a single origin.
+ * Vercel serverless entry point.
  *
- * Streamable HTTP is configured in JSON response mode (stateless). That matches
- * Vercel: each invocation can run on a different instance, so we never keep
- * MCP sessions in process memory.
+ * The complete Express application handles:
  *
- * MongoDB is opened by Express middleware in server/app.js so this handler can
- * stay a plain Express export (Vercel waits on the HTTP response, not on an
- * async wrapper that would resolve too early).
+ * - REST API
+ * - Admin authentication
+ * - OAuth 2.1 endpoints
+ * - MCP Streamable HTTP
+ * - React production assets
+ *
+ * Everything runs from the same Vercel deployment/origin:
+ *
+ * https://mcpcontroller.vercel.app
+ *
+ * MongoDB connection management is handled by server/app.js and the
+ * database connection helper, which reuses the connection between warm
+ * Vercel invocations.
  */
+
 import app from '../server/app.js';
 
+/**
+ * Vercel function configuration.
+ *
+ * MCP requests can take longer than ordinary API requests, so allow the
+ * function to run for up to 60 seconds.
+ */
 export const config = {
-  maxDuration: 60,
-  api: {
-    bodyParser: false
-  }
+  maxDuration: 60
 };
 
 export default app;
