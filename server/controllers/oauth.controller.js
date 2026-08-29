@@ -114,10 +114,7 @@ export async function preview(
   next
 ) {
   try {
-    const data =
-      await previewAuthorization(
-        req.query
-      );
+    const data = await previewAuthorization(req.query, req.user);
 
     return res.json(data);
   } catch (err) {
@@ -239,121 +236,42 @@ export async function token(
 /* OAuth Authorization Bridge                                                */
 /* -------------------------------------------------------------------------- */
 
+function buildConsentPath(query = {}) {
+  const target = new URL('/authorize', `${config.appUrl}/`);
+
+  for (const [key, value] of Object.entries(query)) {
+    if (value === undefined || value === null) continue;
+    target.searchParams.set(key, Array.isArray(value) ? String(value[0]) : String(value));
+  }
+
+  return `${target.pathname}${target.search}`;
+}
+
+function buildLoginPath(query = {}) {
+  const returnTo = buildConsentPath(query);
+  const target = new URL('/login', `${config.appUrl}/`);
+  target.searchParams.set('returnTo', returnTo);
+  return target.toString();
+}
+
 /**
- * ChatGPT starts OAuth here:
+ * OAuth authorization endpoint (RFC 6749).
  *
- * GET /oauth/authorize
- *
- * In production this endpoint must NOT redirect back to
- * /oauth/authorize because that creates an infinite redirect loop.
- *
- * Instead, it sends the user to the React login page while preserving
- * the complete OAuth request.
- *
- * Example:
- *
- * ChatGPT
- *   ↓
- * /oauth/authorize?...OAuth parameters...
- *   ↓
- * /login?...OAuth parameters...
- *   ↓
- * Admin logs in
- *   ↓
- * Consent screen
- *   ↓
- * Allow
- *   ↓
- * /api/oauth/consent
- *   ↓
- * Authorization code
- *   ↓
- * ChatGPT callback
+ * ChatGPT opens GET /oauth/authorize with PKCE parameters.
+ * Authenticated users go to the React consent page (/authorize).
+ * Unauthenticated users go to /login with a returnTo pointing back to consent.
  */
-
-export function authorizeBridge(
-  req,
-  res
-) {
+export function authorizeBridge(req, res) {
   try {
-    /*
-     * The React application handles the login UI.
-     *
-     * IMPORTANT:
-     *
-     * Do NOT redirect to:
-     *
-     *   /oauth/authorize
-     *
-     * because that would redirect back into this same function forever.
-     */
-    const target =
-      new URL(
-        '/login',
-        `${config.appUrl}/`
-      );
-
-    /*
-     * Preserve every OAuth parameter supplied by ChatGPT.
-     *
-     * This includes:
-     *
-     * response_type
-     * client_id
-     * redirect_uri
-     * scope
-     * code_challenge
-     * code_challenge_method
-     * resource
-     * state
-     * ui_locales
-     */
-    for (
-      const [key, value]
-      of Object.entries(
-        req.query || {}
-      )
-    ) {
-      if (
-        value === undefined ||
-        value === null
-      ) {
-        continue;
-      }
-
-      if (Array.isArray(value)) {
-        target.searchParams.set(
-          key,
-          String(value[0])
-        );
-      } else {
-        target.searchParams.set(
-          key,
-          String(value)
-        );
-      }
+    if (req.user) {
+      return res.redirect(302, buildConsentPath(req.query));
     }
 
-    /*
-     * Tell the React application that this is an OAuth login.
-     */
-    target.searchParams.set(
-      'oauth',
-      '1'
-    );
-
-    return res.redirect(
-      302,
-      target.toString()
-    );
+    return res.redirect(302, buildLoginPath(req.query));
   } catch (err) {
     return sendOAuthError(
       res,
-      new AppError(
-        400,
-        'invalid_request',
-        'Unable to start authorization.'
-      )
+      new AppError(400, 'invalid_request', 'Unable to start authorization.')
     );
   }
 }

@@ -13,7 +13,7 @@ const authLimiter = rateLimit({
   skip: () => process.env.NODE_ENV === 'test'
 });
 
-// No /register — MCPController has a single Admin from .env.
+router.post('/register', authLimiter, authController.register);
 router.post('/login', authLimiter, authController.login);
 router.post('/logout', authController.logout);
 router.get('/me', requireUser, authController.me);

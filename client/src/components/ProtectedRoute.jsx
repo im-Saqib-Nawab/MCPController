@@ -7,7 +7,7 @@ export default function ProtectedRoute({ user, loading, children }) {
   }
   if (!user) {
     const next = `${location.pathname}${location.search}`;
-    return <Navigate to={`/login?next=${encodeURIComponent(next)}`} replace />;
+    return <Navigate to={`/login?returnTo=${encodeURIComponent(next)}`} replace />;
   }
   return children;
 }

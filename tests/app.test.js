@@ -46,7 +46,7 @@ async function createClient(clientId = 'chatgpt-test') {
       clientId,
       clientName: 'ChatGPT',
       redirectUris: ['http://localhost:9999/callback'],
-      allowedScopes: ['doctor:read', 'doctor:write', 'doctor:delete'],
+      allowedScopes: ['doctor:read', 'doctor:create', 'doctor:update', 'doctor:delete'],
       tokenEndpointAuthMethod: 'none',
       grantTypes: ['authorization_code', 'refresh_token']
     },
@@ -80,18 +80,23 @@ test('parseBasicAuthorization keeps HTTPS CIMD client ids intact', () => {
   assert.equal(parseBasicAuthorization(`Basic ${encoded}`).clientId, clientId);
 });
 
-test('admin login works and registration is disabled', async () => {
-  const agent = request.agent(app);
-  const register = await agent.post('/api/auth/register').send({
-    email: 'admin@example.com',
-    password: 'whatever'
+test('admin login works and registration creates a normal user', async () => {
+  const registerAgent = request.agent(app);
+  const register = await registerAgent.post('/api/auth/register').send({
+    name: 'Test User',
+    email: 'user@example.com',
+    password: 'password123'
   });
-  assert.equal(register.status, 404);
+  assert.equal(register.status, 201);
+  assert.equal(register.body.user.role, 'user');
+  assert.deepEqual(register.body.user.allowedScopes, ['doctor:read']);
 
-  await loginAdmin(agent);
-  const me = await agent.get('/api/auth/me');
+  const adminAgent = request.agent(app);
+  await loginAdmin(adminAgent);
+  const me = await adminAgent.get('/api/auth/me');
   assert.equal(me.status, 200);
   assert.equal(me.body.user.email, config.adminEmail);
+  assert.equal(me.body.user.role, 'admin');
 });
 
 test('OAuth authorization stores only approved scopes and token contains approved scopes', async () => {
@@ -104,7 +109,7 @@ test('OAuth authorization stores only approved scopes and token contains approve
     response_type: 'code',
     client_id: client.clientId,
     redirect_uri: client.redirectUris[0],
-    scope: 'doctor:read doctor:write doctor:delete',
+    scope: 'doctor:read doctor:create doctor:update doctor:delete',
     state: 'abc123',
     code_challenge: challenge,
     code_challenge_method: 'S256',
@@ -115,12 +120,12 @@ test('OAuth authorization stores only approved scopes and token contains approve
   assert.equal(preview.status, 200);
   assert.deepEqual(
     preview.body.scopes.map((scope) => scope.value),
-    ['doctor:read', 'doctor:write', 'doctor:delete']
+    ['doctor:read', 'doctor:create', 'doctor:update', 'doctor:delete']
   );
 
   const consent = await agent.post('/api/oauth/consent').send({
     decision: 'allow',
-    scopes: ['doctor:read', 'doctor:write'],
+    scopes: ['doctor:read', 'doctor:create'],
     query
   });
   assert.equal(consent.status, 200);
@@ -131,7 +136,7 @@ test('OAuth authorization stores only approved scopes and token contains approve
   assert.equal(redirectUrl.searchParams.get('state'), 'abc123');
 
   const record = await AuthorizationCode.findOne({ codeHash: hashToken(code) }).lean();
-  assert.deepEqual(record.scopes, ['doctor:read', 'doctor:write']);
+  assert.deepEqual(record.scopes, ['doctor:read', 'doctor:create']);
 
   const tokenRes = await request(app).post('/oauth/token').type('form').send({
     grant_type: 'authorization_code',
@@ -142,7 +147,7 @@ test('OAuth authorization stores only approved scopes and token contains approve
     resource: mcpResourceUrl()
   });
   assert.equal(tokenRes.status, 200);
-  assert.equal(tokenRes.body.scope, 'doctor:read doctor:write');
+  assert.equal(tokenRes.body.scope, 'doctor:read doctor:create');
 });
 
 test('public client token exchange can omit client_id and redirect_uri', async () => {
@@ -155,7 +160,7 @@ test('public client token exchange can omit client_id and redirect_uri', async (
     response_type: 'code',
     client_id: client.clientId,
     redirect_uri: client.redirectUris[0],
-    scope: 'doctor:read doctor:write',
+    scope: 'doctor:read doctor:create',
     code_challenge: challenge,
     code_challenge_method: 'S256',
     resource: mcpResourceUrl()
@@ -191,7 +196,7 @@ test('doctor tools honor read and write scopes and block delete without doctor:d
     response_type: 'code',
     client_id: client.clientId,
     redirect_uri: client.redirectUris[0],
-    scope: 'doctor:read doctor:write doctor:delete',
+    scope: 'doctor:read doctor:create doctor:update doctor:delete',
     code_challenge: challenge,
     code_challenge_method: 'S256',
     resource: mcpResourceUrl()
@@ -199,7 +204,7 @@ test('doctor tools honor read and write scopes and block delete without doctor:d
 
   const consent = await agent.post('/api/oauth/consent').send({
     decision: 'allow',
-    scopes: ['doctor:read', 'doctor:write'],
+    scopes: ['doctor:read', 'doctor:create'],
     query
   });
   const code = new URL(consent.body.redirectUrl).searchParams.get('code');
@@ -256,7 +261,7 @@ test('doctor tools honor read and write scopes and block delete without doctor:d
     .set('MCP-Protocol-Version', '2025-11-25')
     .send({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'update_doctor', arguments: { doctorId: createdDoctor.id, specialization: 'Internal Medicine' } } });
   assert.equal(updateRes.status, 200);
-  assert.equal(toolText(mcpPayload(updateRes)).specialization, 'Internal Medicine');
+  assert.match(JSON.stringify(mcpPayload(updateRes)), /Permission denied/i);
 
   const deleteRes = await request(app)
     .post('/mcp')
@@ -281,7 +286,7 @@ test('delete doctor works when doctor:delete is granted', async () => {
     response_type: 'code',
     client_id: client.clientId,
     redirect_uri: client.redirectUris[0],
-    scope: 'doctor:read doctor:write doctor:delete',
+    scope: 'doctor:read doctor:create doctor:update doctor:delete',
     code_challenge: challenge,
     code_challenge_method: 'S256',
     resource: mcpResourceUrl()
@@ -326,7 +331,7 @@ test('revoked token cannot use MCP', async () => {
     response_type: 'code',
     client_id: client.clientId,
     redirect_uri: client.redirectUris[0],
-    scope: 'doctor:read doctor:write doctor:delete',
+    scope: 'doctor:read doctor:create doctor:update doctor:delete',
     code_challenge: challenge,
     code_challenge_method: 'S256',
     resource: mcpResourceUrl()
@@ -334,7 +339,7 @@ test('revoked token cannot use MCP', async () => {
 
   const consent = await agent.post('/api/oauth/consent').send({
     decision: 'allow',
-    scopes: ['doctor:read', 'doctor:write'],
+    scopes: ['doctor:read', 'doctor:create'],
     query
   });
   const code = new URL(consent.body.redirectUrl).searchParams.get('code');
@@ -349,7 +354,10 @@ test('revoked token cannot use MCP', async () => {
   });
   const accessToken = tokenRes.body.access_token;
 
-  const revoke = await request(app).post('/oauth/revoke').type('form').send({ token: accessToken });
+  const revoke = await request(app).post('/oauth/revoke').type('form').send({
+    token: accessToken,
+    client_id: client.clientId
+  });
   assert.equal(revoke.status, 200);
   assert.equal(revoke.body.revoked, true);
 
@@ -382,10 +390,10 @@ test('consent preview lists write and delete even if ChatGPT only requests docto
   assert.equal(preview.status, 200);
   assert.deepEqual(
     preview.body.scopes.map((scope) => scope.value),
-    ['doctor:read', 'doctor:write', 'doctor:delete']
+    ['doctor:read', 'doctor:create', 'doctor:update', 'doctor:delete']
   );
   assert.equal(preview.body.scopes.find((scope) => scope.value === 'doctor:read').requested, true);
-  assert.equal(preview.body.scopes.find((scope) => scope.value === 'doctor:write').requested, false);
+  assert.equal(preview.body.scopes.find((scope) => scope.value === 'doctor:create').requested, false);
 });
 
 test('unauthenticated MCP advertises all doctor scopes', async () => {
@@ -397,7 +405,8 @@ test('unauthenticated MCP advertises all doctor scopes', async () => {
   assert.equal(response.status, 401);
   const header = response.headers['www-authenticate'] || '';
   assert.match(header, /doctor:read/);
-  assert.match(header, /doctor:write/);
+  assert.match(header, /doctor:create/);
+  assert.match(header, /doctor:update/);
   assert.match(header, /doctor:delete/);
 });
 
@@ -415,7 +424,7 @@ test('token exchange accepts ChatGPT CIMD client_id in HTTP Basic', async () => 
     response_type: 'code',
     client_id: clientId,
     redirect_uri: redirectUri,
-    scope: 'doctor:read doctor:write',
+    scope: 'doctor:read doctor:create',
     code_challenge: challenge,
     code_challenge_method: 'S256',
     resource: mcpResourceUrl()
@@ -423,7 +432,7 @@ test('token exchange accepts ChatGPT CIMD client_id in HTTP Basic', async () => 
 
   const consent = await agent.post('/api/oauth/consent').send({
     decision: 'allow',
-    scopes: ['doctor:read', 'doctor:write'],
+    scopes: ['doctor:read', 'doctor:create'],
     query
   });
   const code = new URL(consent.body.redirectUrl).searchParams.get('code');

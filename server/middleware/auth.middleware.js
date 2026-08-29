@@ -3,16 +3,6 @@ import { User } from '../models/User.js';
 import { config } from '../config/env.js';
 import { AppError } from './error.middleware.js';
 
-/**
- * Admin dashboard/login authentication is separate from MCP OAuth.
- *
- * 1. The Admin logs in through the React UI (credentials from .env).
- * 2. Express sets an HTTP-only cookie containing a JWT (admin user id + email).
- * 3. This middleware reads that cookie on /api/* routes such as /api/auth/me
- *    and /api/oauth/consent — so only the logged-in Admin can grant ChatGPT access.
- *
- * ChatGPT never uses this cookie. ChatGPT uses a Bearer access token on /mcp.
- */
 export async function requireUser(req, res, next) {
   try {
     const token = req.cookies?.[config.cookieName];
@@ -39,6 +29,16 @@ export async function requireUser(req, res, next) {
   }
 }
 
+export function requireAdmin(req, res, next) {
+  requireUser(req, res, (err) => {
+    if (err) return next(err);
+    if (req.user?.role !== 'admin') {
+      return next(new AppError(403, 'forbidden', 'Administrator access required.'));
+    }
+    next();
+  });
+}
+
 export async function optionalUser(req, res, next) {
   try {
     const token = req.cookies?.[config.cookieName];
@@ -46,12 +46,14 @@ export async function optionalUser(req, res, next) {
       req.user = null;
       return next();
     }
+
     try {
       const payload = jwt.verify(token, config.jwtSecret);
       req.user = await User.findById(payload.sub).lean();
     } catch {
       req.user = null;
     }
+
     next();
   } catch (err) {
     next(err);

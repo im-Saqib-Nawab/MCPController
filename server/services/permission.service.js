@@ -1,25 +1,20 @@
 import { AppError } from '../middleware/error.middleware.js';
 
-/**
- * MCP tool → required OAuth scope.
- *
- * The consent screen offers doctor:read, doctor:write, and doctor:delete.
- * The Admin can grant a subset. Only granted scopes are written onto the access token.
- * Every tool call checks the token again here — the UI never grants access alone.
- */
+export const SCOPE_LABELS = {
+  'doctor:read': 'Read doctors',
+  'doctor:create': 'Add/create doctors',
+  'doctor:update': 'Update doctors',
+  'doctor:delete': 'Delete doctors'
+};
+
 export const TOOL_SCOPES = {
   list_doctors: 'doctor:read',
   get_doctor: 'doctor:read',
-  add_doctor: 'doctor:write',
-  update_doctor: 'doctor:write',
+  add_doctor: 'doctor:create',
+  update_doctor: 'doctor:update',
   delete_doctor: 'doctor:delete'
 };
 
-/**
- * Permission checks always run on the server. The consent checkboxes only decide
- * which scopes are written onto the access token. A client cannot grant itself
- * extra scopes by editing the frontend.
- */
 export function hasScope(grantedScopes, required) {
   return Array.isArray(grantedScopes) && grantedScopes.includes(required);
 }
@@ -40,4 +35,9 @@ export function assertToolAllowed(toolName, grantedScopes) {
     throw new AppError(400, 'tool_not_allowed', `Unknown tool: ${toolName}`);
   }
   requireScope(grantedScopes, required);
+}
+
+export function filterScopesByUserAllowed(requestedScopes, userAllowedScopes) {
+  const allowed = new Set(userAllowedScopes || []);
+  return requestedScopes.filter((scope) => allowed.has(scope));
 }

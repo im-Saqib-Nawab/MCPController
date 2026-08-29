@@ -8,11 +8,6 @@ function assertDoctorId(doctorId) {
   }
 }
 
-/**
- * Doctor CRUD used by MCP tools and the Admin dashboard.
- * Permission checks happen before these functions are called (MCP tools / routes).
- */
-
 export async function listDoctors() {
   return Doctor.find().sort({ createdAt: -1 }).lean();
 }
@@ -26,18 +21,29 @@ export async function getDoctor(doctorId) {
   return doctor;
 }
 
-export async function addDoctor({ name, specialization }) {
-  return Doctor.create({ name, specialization });
+export async function addDoctor({ name, specialization, email, phone, availability }) {
+  return Doctor.create({
+    name,
+    specialization,
+    email: email || '',
+    phone: phone || '',
+    availability: availability || ''
+  });
 }
 
-export async function updateDoctor(doctorId, { name, specialization }) {
+export async function updateDoctor(doctorId, fields) {
   assertDoctorId(doctorId);
   const doctor = await Doctor.findById(doctorId);
   if (!doctor) {
     throw new AppError(404, 'not_found', 'Doctor not found.');
   }
-  if (name !== undefined) doctor.name = name;
-  if (specialization !== undefined) doctor.specialization = specialization;
+
+  for (const key of ['name', 'specialization', 'email', 'phone', 'availability']) {
+    if (fields[key] !== undefined) {
+      doctor[key] = fields[key];
+    }
+  }
+
   await doctor.save();
   return doctor;
 }
@@ -56,6 +62,9 @@ export function serializeDoctor(doctor) {
     id: String(doctor._id),
     name: doctor.name,
     specialization: doctor.specialization,
+    email: doctor.email || '',
+    phone: doctor.phone || '',
+    availability: doctor.availability || '',
     createdAt: doctor.createdAt,
     updatedAt: doctor.updatedAt
   };

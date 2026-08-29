@@ -1,27 +1,21 @@
 import jwt from 'jsonwebtoken';
-import { User } from '../models/User.js';
+import { User, normalizeAllowedScopes } from '../models/User.js';
 import { config } from '../config/env.js';
 import { AppError } from '../middleware/error.middleware.js';
 
-/**
- * Admin authentication (website session) is separate from MCP OAuth.
- *
- * Why a User document still exists:
- * OAuth codes/tokens/connections need a stable resource-owner id. We keep one
- * Admin User row in MongoDB, but credentials always come from .env — there is
- * no public registration and no multi-user account system.
- */
-
 export function setSessionCookie(res, user) {
   const token = jwt.sign(
-    { sub: String(user._id), email: user.email },
+    {
+      sub: String(user._id || user.id),
+      email: user.email,
+      role: user.role
+    },
     config.jwtSecret,
     { expiresIn: config.jwtExpiresIn }
   );
 
   res.cookie(config.cookieName, token, {
     httpOnly: true,
-    // Lax lets the cookie ride along when ChatGPT redirects the browser here.
     sameSite: 'lax',
     secure: config.isProduction,
     path: '/',
@@ -38,22 +32,34 @@ export function clearSessionCookie(res) {
   });
 }
 
-/**
- * Ensure the single Admin document exists and matches ADMIN_* from .env.
- * Called on login so rotating the env password takes effect immediately.
- */
+export function serializeUser(user) {
+  return {
+    id: String(user._id || user.id),
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    allowedScopes: normalizeAllowedScopes(user.allowedScopes),
+    createdAt: user.createdAt
+  };
+}
+
 export async function ensureAdminUser() {
   const email = config.adminEmail.toLowerCase().trim();
-  let user = await User.findOne({ email });
+  let user = await User.findOne({ email }).select('+password');
 
   if (!user) {
     user = await User.create({
       name: 'Admin',
       email,
-      password: config.adminPassword
+      password: config.adminPassword,
+      role: 'admin',
+      allowedScopes: [...config.scopes]
     });
-  } else if (user.name !== 'Admin') {
+  } else {
     user.name = 'Admin';
+    user.role = 'admin';
+    user.allowedScopes = [...config.scopes];
+    user.password = config.adminPassword;
     await user.save();
   }
 
@@ -62,19 +68,82 @@ export async function ensureAdminUser() {
   return safe;
 }
 
-/**
- * Login only succeeds for ADMIN_EMAIL + ADMIN_PASSWORD from .env.
- * No other accounts can sign in.
- */
-export async function loginAdmin({ email, password }) {
-  const expectedEmail = config.adminEmail.toLowerCase().trim();
-  const providedEmail = String(email || '')
-    .toLowerCase()
-    .trim();
+export async function registerUser({ name, email, password }) {
+  const normalizedEmail = String(email || '').toLowerCase().trim();
+  const adminEmail = config.adminEmail.toLowerCase().trim();
 
-  if (providedEmail !== expectedEmail || password !== config.adminPassword) {
+  if (normalizedEmail === adminEmail) {
+    throw new AppError(
+      409,
+      'registration_not_allowed',
+      'This email is reserved for the administrator account.'
+    );
+  }
+
+  const existing = await User.findOne({ email: normalizedEmail });
+  if (existing) {
+    throw new AppError(409, 'email_in_use', 'An account with this email already exists.');
+  }
+
+  const user = await User.create({
+    name: String(name || '').trim(),
+    email: normalizedEmail,
+    password,
+    role: 'user',
+    allowedScopes: ['doctor:read']
+  });
+
+  return serializeUser(user);
+}
+
+export async function loginUser({ email, password }) {
+  const normalizedEmail = String(email || '').toLowerCase().trim();
+  const adminEmail = config.adminEmail.toLowerCase().trim();
+
+  if (normalizedEmail === adminEmail) {
+    if (password !== config.adminPassword) {
+      throw new AppError(401, 'invalid_credentials', 'Invalid email or password.');
+    }
+    const admin = await ensureAdminUser();
+    return serializeUser(admin);
+  }
+
+  const user = await User.findOne({ email: normalizedEmail }).select('+password');
+  if (!user) {
     throw new AppError(401, 'invalid_credentials', 'Invalid email or password.');
   }
 
-  return ensureAdminUser();
+  const valid = await user.comparePassword(password);
+  if (!valid) {
+    throw new AppError(401, 'invalid_credentials', 'Invalid email or password.');
+  }
+
+  return serializeUser(user);
+}
+
+export async function listUsers() {
+  const users = await User.find().sort({ createdAt: -1 }).lean();
+  return users.map((user) => serializeUser(user));
+}
+
+export async function updateUserPermissions(userId, allowedScopes) {
+  const user = await User.findById(userId);
+  if (!user) {
+    throw new AppError(404, 'not_found', 'User not found.');
+  }
+
+  if (user.role === 'admin') {
+    throw new AppError(400, 'invalid_request', 'Administrator permissions cannot be changed here.');
+  }
+
+  user.allowedScopes = normalizeAllowedScopes(allowedScopes);
+  await user.save();
+  return serializeUser(user);
+}
+
+export function getEffectiveAllowedScopes(user) {
+  if (user.role === 'admin') {
+    return [...config.scopes];
+  }
+  return normalizeAllowedScopes(user.allowedScopes);
 }

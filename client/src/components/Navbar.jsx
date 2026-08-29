@@ -27,9 +27,14 @@ export default function Navbar({ user, onLogout }) {
               </button>
             </>
           ) : (
-            <Link to="/login" className="text-slate-600 hover:text-slate-900">
-              Log in
-            </Link>
+            <>
+              <Link to="/login" className="text-slate-600 hover:text-slate-900">
+                Log in
+              </Link>
+              <Link to="/register" className="text-slate-600 hover:text-slate-900">
+                Register
+              </Link>
+            </>
           )}
         </nav>
       </div>

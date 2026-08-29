@@ -2,9 +2,15 @@ import * as doctorService from '../../services/doctor.service.js';
 import { assertToolAllowed } from '../../services/permission.service.js';
 
 export function updateDoctorTool(authInfo) {
-  return async ({ doctorId, name, specialization }) => {
+  return async ({ doctorId, name, specialization, email, phone, availability }) => {
     assertToolAllowed('update_doctor', authInfo.scopes);
-    const doctor = await doctorService.updateDoctor(doctorId, { name, specialization });
+    const doctor = await doctorService.updateDoctor(doctorId, {
+      name,
+      specialization,
+      email,
+      phone,
+      availability
+    });
     return {
       content: [
         {

@@ -13,7 +13,6 @@ dotenv.config({ path: path.join(root, '.env') });
 async function seed() {
   await connectDatabase();
 
-  // Sync the single Admin document from ADMIN_EMAIL / ADMIN_PASSWORD (no demo users).
   const admin = await ensureAdminUser();
   console.log(`Admin ready: ${admin.email}`);
 
@@ -32,7 +31,7 @@ async function seed() {
       clientId: 'mcp-inspector',
       clientName: 'MCP Inspector',
       redirectUris: inspectorRedirects,
-      allowedScopes: ['doctor:read', 'doctor:write', 'doctor:delete'],
+      allowedScopes: [...config.scopes],
       tokenEndpointAuthMethod: 'none',
       grantTypes: ['authorization_code', 'refresh_token']
     },
@@ -43,9 +42,27 @@ async function seed() {
   const doctorCount = await Doctor.countDocuments();
   if (doctorCount === 0) {
     await Doctor.create([
-      { name: 'Dr. Smith', specialization: 'Cardiology' },
-      { name: 'Dr. Ali', specialization: 'Neurology' },
-      { name: 'Dr. Sarah', specialization: 'Dermatology' }
+      {
+        name: 'Dr. Smith',
+        specialization: 'Cardiology',
+        email: 'smith@clinic.example',
+        phone: '+1-555-0101',
+        availability: 'Mon–Fri 9am–5pm'
+      },
+      {
+        name: 'Dr. Ali',
+        specialization: 'Neurology',
+        email: 'ali@clinic.example',
+        phone: '+1-555-0102',
+        availability: 'Tue–Thu 10am–4pm'
+      },
+      {
+        name: 'Dr. Sarah',
+        specialization: 'Dermatology',
+        email: 'sarah@clinic.example',
+        phone: '+1-555-0103',
+        availability: 'Mon, Wed, Fri 8am–2pm'
+      }
     ]);
     console.log('Created sample doctors');
   }

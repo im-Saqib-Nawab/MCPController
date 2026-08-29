@@ -4,6 +4,7 @@ import Navbar from './components/Navbar.jsx';
 import ProtectedRoute from './components/ProtectedRoute.jsx';
 import Home from './pages/Home.jsx';
 import Login from './pages/Login.jsx';
+import Register from './pages/Register.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import Authorize from './pages/Authorize.jsx';
 import Success from './pages/Success.jsx';
@@ -35,6 +36,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Home user={user} />} />
         <Route path="/login" element={<Login onLoggedIn={setUser} />} />
+        <Route path="/register" element={<Register onRegistered={setUser} />} />
         <Route
           path="/dashboard"
           element={
@@ -44,10 +46,10 @@ export default function App() {
           }
         />
         <Route
-          path="/oauth/authorize"
+          path="/authorize"
           element={
             <ProtectedRoute user={user} loading={loading}>
-              <Authorize />
+              <Authorize user={user} />
             </ProtectedRoute>
           }
         />

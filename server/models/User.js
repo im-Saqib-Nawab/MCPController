@@ -1,11 +1,7 @@
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
+import { config } from '../config/env.js';
 
-/**
- * Represents the single Admin resource owner for OAuth (codes, tokens, connections).
- * Login credentials themselves come from ADMIN_EMAIL / ADMIN_PASSWORD in .env —
- * this collection is not a multi-user account registry.
- */
 const userSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true },
@@ -16,8 +12,16 @@ const userSchema = new mongoose.Schema(
       lowercase: true,
       trim: true
     },
-    // bcrypt hash only — the plain password is never persisted.
-    password: { type: String, required: true, select: false }
+    password: { type: String, required: true, select: false },
+    role: {
+      type: String,
+      enum: ['admin', 'user'],
+      default: 'user'
+    },
+    allowedScopes: {
+      type: [String],
+      default: () => ['doctor:read']
+    }
   },
   { timestamps: true }
 );
@@ -30,5 +34,24 @@ userSchema.pre('save', async function hashPasswordIfNeeded() {
 userSchema.methods.comparePassword = function comparePassword(plain) {
   return bcrypt.compare(plain, this.password);
 };
+
+userSchema.methods.toSafeObject = function toSafeObject() {
+  return {
+    id: String(this._id),
+    name: this.name,
+    email: this.email,
+    role: this.role,
+    allowedScopes: [...this.allowedScopes],
+    createdAt: this.createdAt
+  };
+};
+
+export function normalizeAllowedScopes(scopes) {
+  if (!Array.isArray(scopes)) {
+    return [];
+  }
+
+  return [...new Set(scopes.filter((scope) => config.scopes.includes(scope)))];
+}
 
 export const User = mongoose.model('User', userSchema);

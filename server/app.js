@@ -10,6 +10,7 @@ import { connectDatabase } from './config/database.js';
 import { config } from './config/env.js';
 
 import authRoutes from './routes/auth.routes.js';
+import adminRoutes from './routes/admin.routes.js';
 import connectionRoutes from './routes/connection.routes.js';
 import doctorRoutes from './routes/doctor.routes.js';
 import mcpRoutes from './routes/mcp.routes.js';
@@ -224,6 +225,7 @@ app.get(
 /* -------------------------------------------------------------------------- */
 
 app.use('/api/auth', authRoutes);
+app.use('/api/admin', adminRoutes);
 app.use('/api/connections', connectionRoutes);
 app.use('/api/doctors', doctorRoutes);
 app.use('/api/oauth', oauthApiRouter);
@@ -261,7 +263,7 @@ if (fs.existsSync(config.clientDist)) {
   );
 }
 
-app.get('*', (req, res, next) => {
+app.get('/{*splat}', (req, res, next) => {
   const pathname = req.path;
 
   /*

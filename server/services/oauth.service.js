@@ -12,6 +12,8 @@ import {
 } from '../config/env.js';
 
 import { AppError } from '../middleware/error.middleware.js';
+import { getEffectiveAllowedScopes } from './auth.service.js';
+import { SCOPE_LABELS } from './permission.service.js';
 
 import {
   hashToken,
@@ -20,12 +22,6 @@ import {
   randomToken,
   rotateRefreshToken
 } from './token.service.js';
-
-export const SCOPE_LABELS = {
-  'doctor:read': 'Read Doctors',
-  'doctor:write': 'Add & Update Doctors',
-  'doctor:delete': 'Delete Doctors'
-};
 
 /* -------------------------------------------------------------------------- */
 /* Helpers                                                                    */
@@ -178,6 +174,14 @@ export function parseBasicAuthorization(header) {
    * determining whether the complete decoded value is a valid URL first.
    */
   if (/^https?:\/\//i.test(decoded)) {
+    const emptySecretMatch = decoded.match(/^(https?:\/\/.+):$/);
+    if (emptySecretMatch) {
+      return {
+        clientId: formDecode(emptySecretMatch[1]),
+        clientSecret: ''
+      };
+    }
+
     try {
       const url = new URL(decoded);
 
@@ -653,25 +657,17 @@ export function validateAuthorizeParams(query = {}) {
 /* Authorization preview                                                     */
 /* -------------------------------------------------------------------------- */
 
-export async function previewAuthorization(query) {
+export async function previewAuthorization(query, user = null) {
   const params = validateAuthorizeParams(query);
   const client = await findClient(params.clientId);
 
-  if (
-    !exactRedirectMatch(
-      client.redirectUris,
-      params.redirectUri
-    )
-  ) {
-    throw new AppError(
-      400,
-      'invalid_redirect_uri',
-      'Invalid redirect URI'
-    );
+  if (!exactRedirectMatch(client.redirectUris, params.redirectUri)) {
+    throw new AppError(400, 'invalid_redirect_uri', 'Invalid redirect URI');
   }
 
-  const offered = config.scopes.filter((scope) =>
-    client.allowedScopes.includes(scope)
+  const userAllowed = user ? getEffectiveAllowedScopes(user) : [...config.scopes];
+  const offered = config.scopes.filter(
+    (scope) => client.allowedScopes.includes(scope) && userAllowed.includes(scope)
   );
 
   return {
@@ -679,18 +675,19 @@ export async function previewAuthorization(query) {
       clientId: client.clientId,
       clientName: client.clientName
     },
-
+    user: user
+      ? {
+          id: String(user._id),
+          name: user.name,
+          email: user.email,
+          role: user.role
+        }
+      : null,
     scopes: offered.map((value) => ({
       value,
-
-      label:
-        SCOPE_LABELS[value] ||
-        value,
-
-      requested:
-        params.scopes.includes(value)
+      label: SCOPE_LABELS[value] || value,
+      requested: params.scopes.includes(value)
     })),
-
     redirectUri: params.redirectUri,
     state: params.state,
     resource: params.resource
@@ -730,14 +727,14 @@ export async function createAuthorizationCode({
     );
   }
 
-  const requestedScopes = Array.isArray(grantedScopes)
-    ? grantedScopes
-    : params.scopes;
+  const userAllowed = getEffectiveAllowedScopes(user);
+  const requestedScopes = Array.isArray(grantedScopes) ? grantedScopes : params.scopes;
 
   const scopes = requestedScopes.filter(
     (scope) =>
       config.scopes.includes(scope) &&
-      client.allowedScopes.includes(scope)
+      client.allowedScopes.includes(scope) &&
+      userAllowed.includes(scope)
   );
 
   if (!scopes.length) {
@@ -1012,10 +1009,9 @@ export async function exchangeToken(req) {
     record.clientId
   );
 
-  if (
-    !redirectUri ||
-    redirectUri !== record.redirectUri
-  ) {
+  const effectiveRedirectUri = redirectUri || record.redirectUri;
+
+  if (effectiveRedirectUri !== record.redirectUri) {
     throw new AppError(
       400,
       'invalid_grant',
@@ -1023,12 +1019,7 @@ export async function exchangeToken(req) {
     );
   }
 
-  if (
-    !exactRedirectMatch(
-      client.redirectUris,
-      redirectUri
-    )
-  ) {
+  if (!exactRedirectMatch(client.redirectUris, effectiveRedirectUri)) {
     throw new AppError(
       400,
       'invalid_grant',

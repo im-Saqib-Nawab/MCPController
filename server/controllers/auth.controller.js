@@ -1,29 +1,49 @@
 import { z } from 'zod';
-import { loginAdmin, setSessionCookie, clearSessionCookie } from '../services/auth.service.js';
+import {
+  loginUser,
+  registerUser,
+  setSessionCookie,
+  clearSessionCookie,
+  serializeUser
+} from '../services/auth.service.js';
 import { AppError } from '../middleware/error.middleware.js';
 
 const credentialsSchema = z.object({
   email: z.string().email(),
-  password: z.string().min(1)
+  password: z.string().min(8, 'Password must be at least 8 characters.')
+});
+
+const registerSchema = z.object({
+  name: z.string().min(1, 'Name is required.'),
+  email: z.string().email(),
+  password: z.string().min(8, 'Password must be at least 8 characters.')
 });
 
 function parseOrThrow(schema, data) {
   const result = schema.safeParse(data);
   if (!result.success) {
-    throw new AppError(400, 'invalid_request', 'Validation failed', result.error.issues);
+    throw new AppError(400, 'invalid_request', result.error.issues[0]?.message || 'Validation failed');
   }
   return result.data;
 }
 
-/** Admin login only — credentials are compared to ADMIN_EMAIL / ADMIN_PASSWORD in .env. */
+export async function register(req, res, next) {
+  try {
+    const parsed = parseOrThrow(registerSchema, req.body);
+    const user = await registerUser(parsed);
+    setSessionCookie(res, user);
+    res.status(201).json({ user });
+  } catch (err) {
+    next(err);
+  }
+}
+
 export async function login(req, res, next) {
   try {
     const parsed = parseOrThrow(credentialsSchema, req.body);
-    const user = await loginAdmin(parsed);
+    const user = await loginUser(parsed);
     setSessionCookie(res, user);
-    res.json({
-      user: { id: user._id, name: user.name, email: user.email }
-    });
+    res.json({ user });
   } catch (err) {
     next(err);
   }
@@ -35,12 +55,5 @@ export function logout(req, res) {
 }
 
 export function me(req, res) {
-  res.json({
-    user: {
-      id: req.user._id,
-      name: req.user.name,
-      email: req.user.email,
-      createdAt: req.user.createdAt
-    }
-  });
+  res.json({ user: serializeUser(req.user) });
 }

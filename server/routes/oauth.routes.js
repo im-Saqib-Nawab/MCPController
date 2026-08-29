@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import * as oauthController from '../controllers/oauth.controller.js';
-import { requireUser } from '../middleware/auth.middleware.js';
+import { requireUser, optionalUser } from '../middleware/auth.middleware.js';
 
 const router = Router();
 
@@ -22,7 +22,7 @@ const oauthLimiter = rateLimit({
 /* -------------------------------------------------------------------------- */
 
 // Public: ChatGPT/MCP client initiates authorization
-router.get('/authorize', oauthController.authorizeBridge);
+router.get('/authorize', optionalUser, oauthController.authorizeBridge);
 
 // Public: Code exchange validated via PKCE inside service
 router.post('/token', oauthLimiter, oauthController.token);

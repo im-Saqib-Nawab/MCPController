@@ -36,7 +36,7 @@ export function buildMcpServer(authInfo) {
     name: config.mcpServerName,
     version: config.mcpServerVersion,
     instructions:
-      'MCPController doctor tools. Use list_doctors and get_doctor to read doctor records. Use add_doctor and update_doctor to manage doctors. delete_doctor requires the doctor:delete scope.'
+      'MCPController doctor tools. Use list_doctors and get_doctor to read records. add_doctor requires doctor:create. update_doctor requires doctor:update. delete_doctor requires doctor:delete.'
   });
 
   server.registerTool(
@@ -64,10 +64,13 @@ export function buildMcpServer(authInfo) {
   server.registerTool(
     'add_doctor',
     {
-      description: 'Create a new doctor. Requires doctor:write.',
+      description: 'Create a new doctor. Requires doctor:create.',
       inputSchema: z.object({
         name: z.string().min(1).describe('Doctor name'),
-        specialization: z.string().min(1).describe('Doctor specialization')
+        specialization: z.string().min(1).describe('Doctor specialization'),
+        email: z.string().email().optional().describe('Contact email'),
+        phone: z.string().optional().describe('Contact phone'),
+        availability: z.string().optional().describe('Appointment or availability notes')
       })
     },
     wrap(addDoctorTool(authInfo))
@@ -76,11 +79,14 @@ export function buildMcpServer(authInfo) {
   server.registerTool(
     'update_doctor',
     {
-      description: 'Update an existing doctor. Requires doctor:write.',
+      description: 'Update an existing doctor. Requires doctor:update.',
       inputSchema: z.object({
         doctorId: z.string().min(1).describe('MongoDB id of the doctor'),
         name: z.string().min(1).optional(),
-        specialization: z.string().min(1).optional()
+        specialization: z.string().min(1).optional(),
+        email: z.string().email().optional(),
+        phone: z.string().optional(),
+        availability: z.string().optional()
       })
     },
     wrap(updateDoctorTool(authInfo))
