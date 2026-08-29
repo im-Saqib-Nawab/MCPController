@@ -10,7 +10,7 @@ import { AppError } from '../middleware/error.middleware.js';
 
 const credentialsSchema = z.object({
   email: z.string().email(),
-  password: z.string().min(8, 'Password must be at least 8 characters.')
+  password: z.string().min(1, 'Password is required.')
 });
 
 const registerSchema = z.object({

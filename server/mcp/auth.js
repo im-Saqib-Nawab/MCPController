@@ -1,4 +1,5 @@
 import { config, mcpResourceUrl } from '../config/env.js';
+import { advertisedScopes } from '../services/permission.service.js';
 import { resolveAccessToken } from '../services/token.service.js';
 import { AppError } from '../middleware/error.middleware.js';
 
@@ -7,7 +8,7 @@ function challenge() {
   // RFC 9728: unauthenticated clients discover the authorization server from this header.
   // ChatGPT copies this `scope` into the authorize request, so it must list every
   // permission we want on the consent screen — not only doctor:read.
-  const scope = config.scopes.join(' ');
+  const scope = advertisedScopes().join(' ');
   return `Bearer realm="MCPController", resource_metadata="${metadata}", scope="${scope}"`;
 }
 

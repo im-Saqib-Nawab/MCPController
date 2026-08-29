@@ -5,6 +5,8 @@ import { hasScope, requireScope, assertToolAllowed } from '../server/services/pe
 test('hasScope allows granted permissions', () => {
   assert.equal(hasScope(['doctor:read', 'doctor:create'], 'doctor:read'), true);
   assert.equal(hasScope(['doctor:read', 'doctor:create'], 'doctor:delete'), false);
+  assert.equal(hasScope(['doctor:write'], 'doctor:create'), true);
+  assert.equal(hasScope(['doctor:write'], 'doctor:update'), true);
 });
 
 test('requireScope throws when missing', () => {

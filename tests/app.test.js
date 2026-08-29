@@ -457,11 +457,39 @@ test('token exchange accepts ChatGPT CIMD client_id in HTTP Basic', async () => 
   assert.ok(tokenRes.headers['access-control-allow-origin']);
 });
 
+test('ChatGPT doctor:write scope is accepted and expands for consent', async () => {
+  const client = await createClient('chatgpt-write-scope-client');
+  const agent = request.agent(app);
+  await loginAdmin(agent);
+
+  const { challenge } = pkce();
+  const preview = await agent.get('/api/oauth/request').query({
+    response_type: 'code',
+    client_id: client.clientId,
+    redirect_uri: client.redirectUris[0],
+    scope: 'offline_access doctor:read doctor:write doctor:delete',
+    state: 'chatgpt-write',
+    code_challenge: challenge,
+    code_challenge_method: 'S256',
+    resource: mcpResourceUrl()
+  });
+
+  assert.equal(preview.status, 200);
+  assert.equal(
+    preview.body.scopes.find((scope) => scope.value === 'doctor:create').requested,
+    true
+  );
+  assert.equal(
+    preview.body.scopes.find((scope) => scope.value === 'doctor:update').requested,
+    true
+  );
+});
+
 test('discovery documents are published', async () => {
   const as = await request(app).get('/.well-known/oauth-authorization-server');
   assert.equal(as.status, 200);
   assert.equal(as.body.revocation_endpoint, `${config.apiUrl}/oauth/revoke`);
-  assert.deepEqual(as.body.code_challenge_methods_supported, ['S256']);
+  assert.ok(as.body.scopes_supported.includes('doctor:write'));
 
   const rs = await request(app).get('/.well-known/oauth-protected-resource');
   assert.equal(rs.status, 200);

@@ -80,7 +80,7 @@ export default function Register({ onRegistered }) {
 
           {error ? <p className="text-sm text-red-600">{error}</p> : null}
 
-          <Button className="w-full" disabled={loading}>
+          <Button type="submit" className="w-full" disabled={loading}>
             {loading ? 'Creating account…' : 'Create account'}
           </Button>
         </form>

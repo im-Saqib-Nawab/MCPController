@@ -13,7 +13,14 @@ import {
 
 import { AppError } from '../middleware/error.middleware.js';
 import { getEffectiveAllowedScopes } from './auth.service.js';
-import { SCOPE_LABELS } from './permission.service.js';
+import {
+  ACCEPTED_REQUEST_SCOPES,
+  SCOPE_LABELS,
+  expandLegacyScopes,
+  expandUserAllowedScopes,
+  scopeWasRequested,
+  advertisedScopes
+} from './permission.service.js';
 
 import {
   hashToken,
@@ -55,7 +62,7 @@ export function parseScopes(scope) {
     );
 
   const unknown = requested.filter(
-    (item) => !config.scopes.includes(item)
+    (item) => !ACCEPTED_REQUEST_SCOPES.includes(item)
   );
 
   if (unknown.length) {
@@ -66,9 +73,21 @@ export function parseScopes(scope) {
     );
   }
 
-  return requested.length
-    ? [...new Set(requested)]
-    : [...config.scopes];
+  const expanded = expandLegacyScopes(requested);
+
+  return expanded.length ? expanded : [...config.scopes];
+}
+
+export function parseRequestedScopes(scope) {
+  if (!scope) {
+    return [];
+  }
+
+  return String(scope)
+    .split(/[\s+,]+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .filter((item) => item !== 'offline_access' && item !== 'openid');
 }
 
 function normalizeRedirectUri(uri) {
@@ -640,6 +659,7 @@ export function validateAuthorizeParams(query = {}) {
     redirectUri,
 
     scopes: parseScopes(scope),
+    rawRequestedScopes: parseRequestedScopes(scope),
 
     state,
 
@@ -665,7 +685,9 @@ export async function previewAuthorization(query, user = null) {
     throw new AppError(400, 'invalid_redirect_uri', 'Invalid redirect URI');
   }
 
-  const userAllowed = user ? getEffectiveAllowedScopes(user) : [...config.scopes];
+  const userAllowed = expandUserAllowedScopes(
+    user ? getEffectiveAllowedScopes(user) : [...config.scopes]
+  );
   const offered = config.scopes.filter(
     (scope) => client.allowedScopes.includes(scope) && userAllowed.includes(scope)
   );
@@ -686,7 +708,7 @@ export async function previewAuthorization(query, user = null) {
     scopes: offered.map((value) => ({
       value,
       label: SCOPE_LABELS[value] || value,
-      requested: params.scopes.includes(value)
+      requested: scopeWasRequested(params.rawRequestedScopes, value)
     })),
     redirectUri: params.redirectUri,
     state: params.state,
@@ -727,10 +749,10 @@ export async function createAuthorizationCode({
     );
   }
 
-  const userAllowed = getEffectiveAllowedScopes(user);
+  const userAllowed = expandUserAllowedScopes(getEffectiveAllowedScopes(user));
   const requestedScopes = Array.isArray(grantedScopes) ? grantedScopes : params.scopes;
 
-  const scopes = requestedScopes.filter(
+  const scopes = expandLegacyScopes(requestedScopes).filter(
     (scope) =>
       config.scopes.includes(scope) &&
       client.allowedScopes.includes(scope) &&
@@ -1130,10 +1152,7 @@ export function authorizationServerMetadata() {
 
     revocation_endpoint: `${issuer}/oauth/revoke`,
 
-    scopes_supported: [
-      ...config.scopes,
-      'offline_access'
-    ],
+    scopes_supported: [...advertisedScopes(), 'offline_access'],
 
     response_types_supported: ['code'],
 
@@ -1171,7 +1190,7 @@ export function protectedResourceMetadata() {
 
     bearer_methods_supported: ['header'],
 
-    scopes_supported: [...config.scopes],
+    scopes_supported: advertisedScopes(),
 
     resource_documentation: `${config.appUrl}/`
   };
