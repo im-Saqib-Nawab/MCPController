@@ -6,6 +6,9 @@ import Home from './pages/Home.jsx';
 import Login from './pages/Login.jsx';
 import Register from './pages/Register.jsx';
 import Dashboard from './pages/Dashboard.jsx';
+import Doctors from './pages/Doctors.jsx';
+import DoctorDetail from './pages/DoctorDetail.jsx';
+import Profile from './pages/Profile.jsx';
 import Authorize from './pages/Authorize.jsx';
 import Success from './pages/Success.jsx';
 import { api } from './services/api.js';
@@ -41,7 +44,31 @@ export default function App() {
           path="/dashboard"
           element={
             <ProtectedRoute user={user} loading={loading}>
-              <Dashboard user={user} />
+              <Dashboard user={user} onUserUpdated={setUser} />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/doctors"
+          element={
+            <ProtectedRoute user={user} loading={loading}>
+              <Doctors />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/doctors/:doctorId"
+          element={
+            <ProtectedRoute user={user} loading={loading}>
+              <DoctorDetail user={user} />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/profile"
+          element={
+            <ProtectedRoute user={user} loading={loading}>
+              <Profile user={user} onUserUpdated={setUser} />
             </ProtectedRoute>
           }
         />

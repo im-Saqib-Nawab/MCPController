@@ -8,8 +8,10 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': 'http://localhost:3000',
+      '/oauth/authorize': 'http://localhost:3000',
       '/oauth/token': 'http://localhost:3000',
       '/oauth/register': 'http://localhost:3000',
+      '/oauth/revoke': 'http://localhost:3000',
       '/mcp': 'http://localhost:3000',
       '/.well-known': 'http://localhost:3000'
     }

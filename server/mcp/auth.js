@@ -1,6 +1,8 @@
 import { config, mcpResourceUrl } from '../config/env.js';
-import { advertisedScopes } from '../services/permission.service.js';
+import { advertisedScopes, hasScope } from '../services/permission.service.js';
 import { resolveAccessToken } from '../services/token.service.js';
+import { getEffectiveAllowedScopes } from '../services/auth.service.js';
+import { User } from '../models/User.js';
 import { AppError } from '../middleware/error.middleware.js';
 
 function challenge() {
@@ -39,14 +41,23 @@ export async function requireMcpBearer(req, res, next) {
       throw new AppError(401, 'invalid_token', 'Token was not issued for this MCP resource.');
     }
 
+    const user = await User.findById(record.userId).lean();
+    if (!user) {
+      res.setHeader('WWW-Authenticate', challenge());
+      throw new AppError(401, 'invalid_token', 'The user for this token no longer exists.');
+    }
+
+    const allowed = getEffectiveAllowedScopes(user);
+    const liveScopes = (record.scopes || []).filter((scope) => hasScope(allowed, scope));
+
     // Shape expected by @modelcontextprotocol/node toNodeHandler (req.auth).
     req.auth = {
       token,
       clientId: record.clientId,
-      scopes: record.scopes,
+      scopes: liveScopes,
       expiresAt: Math.floor(record.expiresAt.getTime() / 1000),
       resource: new URL(record.resource),
-      extra: { userId: String(record.userId) }
+      extra: { userId: String(record.userId), role: user.role }
     };
     next();
   } catch (err) {

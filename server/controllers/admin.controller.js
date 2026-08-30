@@ -1,4 +1,5 @@
 import { listUsers, updateUserPermissions } from '../services/auth.service.js';
+import { dashboardStats } from '../services/appointment.service.js';
 import { config } from '../config/env.js';
 import { SCOPE_LABELS } from '../services/permission.service.js';
 import { AppError } from '../middleware/error.middleware.js';
@@ -33,4 +34,12 @@ export function listScopeOptions(_req, res) {
       label: SCOPE_LABELS[value] || value
     }))
   });
+}
+
+export async function stats(req, res, next) {
+  try {
+    res.json({ stats: await dashboardStats() });
+  } catch (err) {
+    next(err);
+  }
 }

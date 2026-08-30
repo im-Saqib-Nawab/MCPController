@@ -1,21 +1,12 @@
 import * as doctorService from '../../services/doctor.service.js';
 import { assertToolAllowed } from '../../services/permission.service.js';
+import { getActor, liveScopes, toolResult } from '../actor.js';
 
-/**
- * list_doctors → requires doctor:read on the access token (granted at Admin consent).
- * authInfo.scopes comes from the Bearer token resolved in mcp/auth.js.
- */
 export function listDoctorsTool(authInfo) {
   return async () => {
-    assertToolAllowed('list_doctors', authInfo.scopes);
-    const doctors = await doctorService.listDoctors();
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify(doctors.map(doctorService.serializeDoctor), null, 2)
-        }
-      ]
-    };
+    const actor = await getActor(authInfo);
+    assertToolAllowed('list_doctors', liveScopes(authInfo, actor));
+    const doctors = await doctorService.listDoctorsPublic();
+    return toolResult(doctors);
   };
 }

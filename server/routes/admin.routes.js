@@ -8,5 +8,6 @@ router.use(requireAdmin);
 router.get('/users', adminController.listAllUsers);
 router.patch('/users/:userId/permissions', adminController.updatePermissions);
 router.get('/scopes', adminController.listScopeOptions);
+router.get('/stats', adminController.stats);
 
 export default router;

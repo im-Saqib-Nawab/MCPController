@@ -78,8 +78,7 @@ const accessTokenSchema = new mongoose.Schema(
      */
     grantExpiresAt: {
       type: Date,
-      required: true,
-      index: true
+      required: true
     },
 
     /**

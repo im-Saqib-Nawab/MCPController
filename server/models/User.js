@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 import { config } from '../config/env.js';
+import { publicRole } from '../lib/roles.js';
 
 const userSchema = new mongoose.Schema(
   {
@@ -15,12 +16,20 @@ const userSchema = new mongoose.Schema(
     password: { type: String, required: true, select: false },
     role: {
       type: String,
-      enum: ['admin', 'user'],
-      default: 'user'
+      enum: ['admin', 'user', 'doctor', 'patient'],
+      default: 'patient'
     },
+    phone: { type: String, trim: true, default: '' },
+    age: { type: Number, min: 0, max: 130, default: null },
+    gender: {
+      type: String,
+      enum: ['male', 'female', 'other', ''],
+      default: ''
+    },
+    bio: { type: String, trim: true, default: '' },
     allowedScopes: {
       type: [String],
-      default: () => ['doctor:read']
+      default: () => ['doctor:read', 'availability:read', 'appointment:read', 'appointment:create', 'appointment:update', 'profile:read', 'profile:update']
     }
   },
   { timestamps: true }
@@ -40,9 +49,14 @@ userSchema.methods.toSafeObject = function toSafeObject() {
     id: String(this._id),
     name: this.name,
     email: this.email,
-    role: this.role,
+    role: publicRole(this),
+    phone: this.phone || '',
+    age: this.age ?? null,
+    gender: this.gender || '',
+    bio: this.bio || '',
     allowedScopes: [...this.allowedScopes],
-    createdAt: this.createdAt
+    createdAt: this.createdAt,
+    updatedAt: this.updatedAt
   };
 };
 

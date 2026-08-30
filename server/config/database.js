@@ -16,7 +16,8 @@ const globalCache = globalThis;
 if (!globalCache.__mcpcontrollerMongoCache) {
   globalCache.__mcpcontrollerMongoCache = {
     uri: null,
-    promise: null
+    promise: null,
+    indexesReady: false
   };
 }
 
@@ -53,6 +54,7 @@ export async function connectDatabase(uri = config.mongodbUri) {
 
   try {
     await cache.promise;
+    await syncCollectionIndexes();
     return mongoose.connection;
   } catch (err) {
     /*
@@ -65,6 +67,19 @@ export async function connectDatabase(uri = config.mongodbUri) {
   }
 }
 
+async function syncCollectionIndexes() {
+  if (cache.indexesReady) return;
+  const { Doctor } = await import('../models/Doctor.js');
+  const { Appointment } = await import('../models/Appointment.js');
+  try {
+    await Doctor.collection.dropIndex('userId_1');
+  } catch {
+    // The previous unique userId index may not exist.
+  }
+  await Promise.all([Doctor.syncIndexes(), Appointment.syncIndexes()]);
+  cache.indexesReady = true;
+}
+
 export async function disconnectDatabase() {
   /*
    * Explicit disconnect - primarily used in CLI seed scripts and test teardowns.
@@ -72,6 +87,7 @@ export async function disconnectDatabase() {
    */
   cache.promise = null;
   cache.uri = null;
+  cache.indexesReady = false;
 
   if (mongoose.connection.readyState !== 0) {
     await mongoose.disconnect();

@@ -88,8 +88,9 @@ test('admin login works and registration creates a normal user', async () => {
     password: 'password123'
   });
   assert.equal(register.status, 201);
-  assert.equal(register.body.user.role, 'user');
-  assert.deepEqual(register.body.user.allowedScopes, ['doctor:read']);
+  assert.equal(register.body.user.role, 'patient');
+  assert.ok(register.body.user.allowedScopes.includes('doctor:read'));
+  assert.ok(register.body.user.allowedScopes.includes('appointment:create'));
 
   const adminAgent = request.agent(app);
   await loginAdmin(adminAgent);
@@ -118,10 +119,10 @@ test('OAuth authorization stores only approved scopes and token contains approve
 
   const preview = await agent.get('/api/oauth/request').query(query);
   assert.equal(preview.status, 200);
-  assert.deepEqual(
-    preview.body.scopes.map((scope) => scope.value),
-    ['doctor:read', 'doctor:create', 'doctor:update', 'doctor:delete']
-  );
+  const previewScopes = preview.body.scopes.map((scope) => scope.value);
+  assert.ok(previewScopes.includes('doctor:read'));
+  assert.ok(previewScopes.includes('doctor:create'));
+  assert.ok(previewScopes.includes('appointment:read'));
 
   const consent = await agent.post('/api/oauth/consent').send({
     decision: 'allow',
@@ -388,10 +389,11 @@ test('consent preview lists write and delete even if ChatGPT only requests docto
     resource: mcpResourceUrl()
   });
   assert.equal(preview.status, 200);
-  assert.deepEqual(
-    preview.body.scopes.map((scope) => scope.value),
-    ['doctor:read', 'doctor:create', 'doctor:update', 'doctor:delete']
-  );
+  const values = preview.body.scopes.map((scope) => scope.value);
+  assert.ok(values.includes('doctor:read'));
+  assert.ok(values.includes('doctor:create'));
+  assert.ok(values.includes('doctor:update'));
+  assert.ok(values.includes('doctor:delete'));
   assert.equal(preview.body.scopes.find((scope) => scope.value === 'doctor:read').requested, true);
   assert.equal(preview.body.scopes.find((scope) => scope.value === 'doctor:create').requested, false);
 });

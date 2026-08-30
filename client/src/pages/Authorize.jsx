@@ -1,14 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import Button from '../components/Button.jsx';
+import { SCOPE_OPTIONS } from '../lib/scopes.js';
 import { api, getErrorMessage } from '../services/api.js';
 
-const friendlyScopeLabel = {
-  'doctor:read': 'Read doctors',
-  'doctor:create': 'Add/create doctors',
-  'doctor:update': 'Update doctors',
-  'doctor:delete': 'Delete doctors'
-};
+const friendlyScopeLabel = Object.fromEntries(SCOPE_OPTIONS.map((scope) => [scope.value, scope.label]));
 
 export default function Authorize({ user }) {
   const [params] = useSearchParams();
@@ -136,14 +132,14 @@ export default function Authorize({ user }) {
     );
   }
 
-  const roleLabel = user.role === 'admin' ? 'Administrator' : 'User';
+  const roleLabel = user.role === 'admin' ? 'Administrator' : user.role === 'doctor' ? 'Doctor' : 'Patient';
 
   return (
     <main className="mx-auto max-w-xl px-4 py-12">
       <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <p className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">OAuth consent</p>
         <h1 className="mt-3 text-2xl font-semibold text-slate-900">
-          ChatGPT is requesting doctor management access
+          ChatGPT is requesting access
         </h1>
         <p className="mt-3 text-sm text-slate-600">
           You are authorizing as <strong>{roleLabel}</strong> ({user.email}). Only permissions your account

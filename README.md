@@ -1,8 +1,8 @@
 # MCPController
 
-MCPController is a single-deploy doctor management application with a React frontend, Express API, OAuth 2.1 authorization server, and MCP server — all served from one origin (for example `https://mcpcontroller.vercel.app`).
+MCPController is a single-deploy doctor–patient appointment application with a React frontend, Express API, OAuth 2.1 authorization server, and MCP server — all served from one origin (for example `https://mcpcontroller.vercel.app`).
 
-ChatGPT connects through OAuth with PKCE. Users log in (or register), review a consent screen, grant doctor-management permissions, and ChatGPT receives access and refresh tokens for the `/mcp` endpoint. Every MCP tool enforces the scopes granted during consent.
+Patients book available days. Doctors accept one patient per day and can offer another date. Administrators manage the system. ChatGPT connects through OAuth with PKCE. Every MCP tool checks the caller’s role, ownership, and granted scopes.
 
 ## Architecture
 
@@ -23,11 +23,11 @@ ChatGPT
 
 | Layer | Responsibility |
 | --- | --- |
-| **Frontend (`client/`)** | Login, register, OAuth consent, dashboard, permission management |
-| **API (`server/routes/`, `server/controllers/`)** | REST endpoints for auth, admin, doctors, connections |
+| **Frontend (`client/`)** | Role dashboards, booking UI, OAuth consent, profile |
+| **API (`server/routes/`, `server/controllers/`)** | REST endpoints for auth, admin, doctors, patients, appointments, connections |
 | **OAuth (`server/services/oauth.service.js`)** | Authorization code + PKCE, DCR, token exchange, revocation |
-| **MCP (`server/mcp/`)** | Streamable HTTP MCP server with doctor tools |
-| **Models (`server/models/`)** | User, Doctor, OAuthClient, AccessToken, Connection, AuthorizationCode |
+| **MCP (`server/mcp/`)** | Streamable HTTP MCP server with role-aware tools |
+| **Models (`server/models/`)** | User, Doctor, Appointment, OAuthClient, AccessToken, Connection, AuthorizationCode |
 | **Vercel entry (`api/index.js`)** | Serverless Express handler for production |
 
 ## Authentication
@@ -39,8 +39,9 @@ Two separate credential systems:
 
 ### Accounts
 
-- **Administrator** — credentials from `ADMIN_EMAIL` / `ADMIN_PASSWORD` in environment variables. Has all scopes and can manage other users’ permissions.
-- **Normal users** — register through the website. Default allowed scope: `doctor:read`. An admin can grant additional scopes from the dashboard.
+- **Administrator** — credentials from `ADMIN_EMAIL` / `ADMIN_PASSWORD`. Has all scopes and can manage doctors, patients, appointments, and permissions.
+- **Doctors** — register through the website, set weekly availability, and accept or reject appointment requests.
+- **Patients** — register through the website, view doctors, request an available day, and accept suggested alternatives.
 
 Registration is disabled for the reserved admin email address.
 
@@ -65,6 +66,15 @@ Revoking a connection from the dashboard (or calling `POST /oauth/revoke`) immed
 | `doctor:create` | `add_doctor` |
 | `doctor:update` | `update_doctor` |
 | `doctor:delete` | `delete_doctor` |
+| `patient:read` | `list_patients`, `get_patient` |
+| `patient:create` | `add_patient` |
+| `patient:update` | `update_patient` |
+| `patient:delete` | `delete_patient` |
+| `appointment:read` | `list_appointments` |
+| `appointment:create` | `request_appointment` |
+| `appointment:update` | accept / reject / suggest / cancel / complete appointment tools |
+| `availability:update` | `update_availability` |
+| `profile:read` / `profile:update` | `get_my_profile`, `update_my_profile` |
 
 Permissions are enforced in three places:
 
@@ -80,7 +90,9 @@ Permissions are enforced in three places:
 | `specialization` | Required |
 | `email` | Optional contact email |
 | `phone` | Optional phone number |
-| `availability` | Optional appointment / availability notes |
+| `availability` | Summary / notes |
+| `weeklyAvailability` | Monday–Sunday: `available` or `unavailable` |
+| `userId` | Linked login account when the doctor registered |
 
 ## Environment variables
 
@@ -109,9 +121,14 @@ Create a `.env` file in the project root (see `.env.example`).
 
 ```bash
 npm install
-npm run seed    # creates admin, sample doctors, MCP Inspector client
+npm run seed    # creates admin, sample doctor/patient accounts, MCP Inspector client
 npm run dev     # Express :3000 + Vite :5173
 ```
+
+Seeded demo logins (password `Doctor123!` / `Patient123!`):
+
+- Doctor: `ahmed@clinic.example`
+- Patient: `patient.a@example.com`
 
 Vite proxies `/api`, `/oauth/token`, `/oauth/register`, `/mcp`, and `/.well-known` to Express.
 

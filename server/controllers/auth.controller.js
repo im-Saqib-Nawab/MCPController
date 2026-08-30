@@ -4,7 +4,8 @@ import {
   registerUser,
   setSessionCookie,
   clearSessionCookie,
-  serializeUser
+  serializeUserWithProfile,
+  updateOwnProfile
 } from '../services/auth.service.js';
 import { AppError } from '../middleware/error.middleware.js';
 
@@ -16,7 +17,22 @@ const credentialsSchema = z.object({
 const registerSchema = z.object({
   name: z.string().min(1, 'Name is required.'),
   email: z.string().email(),
-  password: z.string().min(8, 'Password must be at least 8 characters.')
+  password: z.string().min(8, 'Password must be at least 8 characters.'),
+  role: z.enum(['doctor', 'patient']).optional(),
+  specialization: z.string().optional(),
+  phone: z.string().optional(),
+  age: z.coerce.number().int().min(0).max(130).optional(),
+  gender: z.enum(['male', 'female', 'other', '']).optional(),
+  bio: z.string().optional()
+});
+
+const profileSchema = z.object({
+  name: z.string().min(1).optional(),
+  phone: z.string().optional(),
+  age: z.union([z.coerce.number().int().min(0).max(130), z.null()]).optional(),
+  gender: z.enum(['male', 'female', 'other', '']).optional(),
+  bio: z.string().optional(),
+  specialization: z.string().optional()
 });
 
 function parseOrThrow(schema, data) {
@@ -54,6 +70,20 @@ export function logout(req, res) {
   res.json({ ok: true });
 }
 
-export function me(req, res) {
-  res.json({ user: serializeUser(req.user) });
+export async function me(req, res, next) {
+  try {
+    res.json({ user: await serializeUserWithProfile(req.user) });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function updateMe(req, res, next) {
+  try {
+    const parsed = parseOrThrow(profileSchema, req.body || {});
+    const user = await updateOwnProfile(req.user._id, parsed);
+    res.json({ user });
+  } catch (err) {
+    next(err);
+  }
 }

@@ -39,7 +39,7 @@ export default function Login({ onLoggedIn }) {
         </p>
         <h1 className="mt-2 text-2xl font-semibold tracking-tight text-slate-900">Log in</h1>
         <p className="mt-2 text-sm text-slate-600">
-          Sign in with your account to manage doctors and authorize ChatGPT connections.
+          Sign in as a patient, doctor, or administrator. ChatGPT connections use this same account.
         </p>
 
         <form onSubmit={submit} className="mt-6 space-y-4">

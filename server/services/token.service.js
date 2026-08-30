@@ -176,3 +176,9 @@ export async function rotateRefreshToken(rawRefreshToken) {
     clientId: record.clientId
   };
 }
+
+export async function revokeUserTokens(userId) {
+  if (!userId) return 0;
+  const result = await AccessToken.updateMany({ userId, revoked: false }, { revoked: true });
+  return result.modifiedCount || 0;
+}

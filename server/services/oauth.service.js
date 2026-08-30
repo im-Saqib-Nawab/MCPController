@@ -471,6 +471,13 @@ export async function findClient(clientId) {
     );
   }
 
+  const current = new Set(client.allowedScopes || []);
+  const missing = config.scopes.filter((scope) => !current.has(scope));
+  if (missing.length) {
+    client.allowedScopes = [...new Set([...client.allowedScopes, ...config.scopes])];
+    await client.save();
+  }
+
   return client;
 }
 
@@ -998,32 +1005,25 @@ export async function exchangeToken(req) {
     );
   }
 
-  const record = await AuthorizationCode.findOne({
-    codeHash: hashToken(code)
-  });
+  const record = await AuthorizationCode.findOneAndUpdate(
+    {
+      codeHash: hashToken(code),
+      used: false,
+      expiresAt: { $gt: new Date() }
+    },
+    { $set: { used: true } },
+    { new: false }
+  );
 
   if (!record) {
-    throw new AppError(
-      400,
-      'invalid_grant',
-      'Invalid authorization code'
-    );
-  }
-
-  if (record.used) {
-    throw new AppError(
-      400,
-      'invalid_grant',
-      'Authorization code has already been used.'
-    );
-  }
-
-  if (record.expiresAt.getTime() <= Date.now()) {
-    throw new AppError(
-      400,
-      'invalid_grant',
-      'Authorization code has expired.'
-    );
+    const existing = await AuthorizationCode.findOne({ codeHash: hashToken(code) }).lean();
+    if (existing?.used) {
+      throw new AppError(400, 'invalid_grant', 'Authorization code has already been used.');
+    }
+    if (existing && existing.expiresAt.getTime() <= Date.now()) {
+      throw new AppError(400, 'invalid_grant', 'Authorization code has expired.');
+    }
+    throw new AppError(400, 'invalid_grant', 'Invalid authorization code');
   }
 
   const client = await authenticateOAuthClient(
@@ -1075,9 +1075,6 @@ export async function exchangeToken(req) {
       'PKCE verification failed.'
     );
   }
-
-  record.used = true;
-  await record.save();
 
   return issueTokens({
     userId: record.userId,
