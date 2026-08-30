@@ -70,9 +70,10 @@ Revoking a connection from the dashboard (or calling `POST /oauth/revoke`) immed
 | `patient:create` | `add_patient` |
 | `patient:update` | `update_patient` |
 | `patient:delete` | `delete_patient` |
-| `appointment:read` | `list_appointments` |
+| `appointment:read` | `list_appointments`, `get_appointment`, `list_my_appointments`, `list_doctor_appointment_requests`, `admin_get_dashboard_stats` |
 | `appointment:create` | `request_appointment` |
-| `appointment:update` | accept / reject / suggest / cancel / complete appointment tools |
+| `appointment:update` | accept / reject / suggest / cancel / complete / `admin_update_appointment` |
+| `availability:read` | `check_doctor_availability` (also included in `get_doctor` / `list_doctors`) |
 | `availability:update` | `update_availability` |
 | `profile:read` / `profile:update` | `get_my_profile`, `update_my_profile` |
 
@@ -81,6 +82,19 @@ Permissions are enforced in three places:
 1. **User account** — `allowedScopes` on the User document (admin-managed for normal users).
 2. **OAuth consent** — only scopes the user is allowed to grant can be selected.
 3. **MCP tools** — every tool call checks the access token scopes again.
+
+### Complete MCP tool list (27 tools)
+
+| Category | Tools |
+| --- | --- |
+| **Doctors** | `list_doctors`, `get_doctor`, `add_doctor`, `update_doctor`, `delete_doctor` |
+| **Availability** | `check_doctor_availability`, `update_availability` |
+| **Patients** | `list_patients`, `get_patient`, `add_patient`, `update_patient`, `delete_patient` |
+| **Appointments** | `list_appointments`, `list_my_appointments`, `list_doctor_appointment_requests`, `get_appointment`, `request_appointment`, `accept_appointment`, `reject_appointment`, `suggest_alternative_date`, `accept_alternative_date`, `cancel_appointment`, `complete_appointment` |
+| **Admin** | `admin_update_appointment`, `admin_get_dashboard_stats` |
+| **Profile** | `get_my_profile`, `update_my_profile` |
+
+**ChatGPT tip:** If you only see a few doctor tools, reconnect and grant the scopes you need on the consent screen (appointments, patients, availability, profile). Tools are filtered by the scopes granted during OAuth — not by role alone.
 
 ## Doctor model
 

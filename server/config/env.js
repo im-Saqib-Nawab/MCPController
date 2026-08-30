@@ -38,7 +38,7 @@ export const config = {
   accessTokenTtlSeconds: Number(process.env.ACCESS_TOKEN_TTL_SECONDS) || 3600,
   refreshTokenTtlSeconds: Number(process.env.REFRESH_TOKEN_TTL_SECONDS) || 2592000,
   mcpServerName: process.env.MCP_SERVER_NAME || 'MCPController',
-  mcpServerVersion: process.env.MCP_SERVER_VERSION || '1.0.0',
+  mcpServerVersion: process.env.MCP_SERVER_VERSION || '1.1.0',
   cookieName: 'mcpcontroller_session',
   scopes: [
     'doctor:read',

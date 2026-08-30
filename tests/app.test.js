@@ -487,6 +487,56 @@ test('ChatGPT doctor:write scope is accepted and expands for consent', async () 
   );
 });
 
+test('MCP exposes the full tool catalog', async () => {
+  const client = await createClient('full-catalog-client');
+  const agent = request.agent(app);
+  await loginAdmin(agent);
+
+  const { verifier, challenge } = pkce();
+  const query = {
+    response_type: 'code',
+    client_id: client.clientId,
+    redirect_uri: client.redirectUris[0],
+    scope: config.scopes.join(' '),
+    code_challenge: challenge,
+    code_challenge_method: 'S256',
+    resource: mcpResourceUrl()
+  };
+
+  const consent = await agent.post('/api/oauth/consent').send({
+    decision: 'allow',
+    scopes: [...config.scopes],
+    query
+  });
+  const code = new URL(consent.body.redirectUrl).searchParams.get('code');
+
+  const tokenRes = await request(app).post('/oauth/token').type('form').send({
+    grant_type: 'authorization_code',
+    code,
+    redirect_uri: client.redirectUris[0],
+    client_id: client.clientId,
+    code_verifier: verifier,
+    resource: mcpResourceUrl()
+  });
+  const token = tokenRes.body.access_token;
+
+  const listToolsRes = await request(app)
+    .post('/mcp')
+    .set('Authorization', `Bearer ${token}`)
+    .set('Accept', 'application/json, text/event-stream')
+    .set('Content-Type', 'application/json')
+    .set('MCP-Protocol-Version', '2025-11-25')
+    .send({ jsonrpc: '2.0', id: 99, method: 'tools/list', params: {} });
+  assert.equal(listToolsRes.status, 200);
+  const payload = mcpPayload(listToolsRes);
+  const toolNames = payload.result.tools.map((tool) => tool.name).sort();
+  assert.equal(toolNames.length, 27);
+  assert.ok(toolNames.includes('request_appointment'));
+  assert.ok(toolNames.includes('check_doctor_availability'));
+  assert.ok(toolNames.includes('list_doctor_appointment_requests'));
+  assert.ok(toolNames.includes('admin_update_appointment'));
+});
+
 test('discovery documents are published', async () => {
   const as = await request(app).get('/.well-known/oauth-authorization-server');
   assert.equal(as.status, 200);

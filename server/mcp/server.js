@@ -21,9 +21,15 @@ import {
   suggestAlternativeDateTool,
   acceptAlternativeDateTool,
   cancelAppointmentTool,
-  completeAppointmentTool
+  completeAppointmentTool,
+  getAppointmentTool,
+  listMyAppointmentsTool,
+  listDoctorAppointmentRequestsTool,
+  adminUpdateAppointmentTool,
+  adminGetDashboardStatsTool
 } from './tools/appointment.tools.js';
 import { getMyProfileTool, updateMyProfileTool, updateAvailabilityTool } from './tools/profile.tools.js';
+import { checkDoctorAvailabilityTool } from './tools/availability.tools.js';
 
 const weeklyAvailabilitySchema = z
   .object({
@@ -66,7 +72,7 @@ export function buildMcpServer(authInfo) {
     name: config.mcpServerName,
     version: config.mcpServerVersion,
     instructions:
-      'Doctor-patient appointment MCP. Tools enforce the caller role and granted OAuth scopes. Doctors can only change their own profile and appointments. Patients can only manage their own appointments. Admins can manage the full system.'
+      'Doctor-patient appointment MCP for the full clinic system. Roles: admin (manage everything), doctor (own profile, availability, appointment requests), patient (browse doctors, book appointments). Appointment statuses: REQUESTED (pending), ACCEPTED, REJECTED, ALTERNATIVE_OFFERED, CANCELLED, COMPLETED. Backend rules: one accepted patient per doctor per day; cancelled/rejected days become available again; no self-booking; no past dates; no booking on unavailable weekdays. Every tool checks OAuth scopes, role, and ownership.'
   });
 
   server.registerTool(
@@ -335,6 +341,81 @@ export function buildMcpServer(authInfo) {
       })
     },
     wrap(updateAvailabilityTool(authInfo))
+  );
+
+  server.registerTool(
+    'check_doctor_availability',
+    {
+      description: 'Check whether a doctor can be booked on a specific date. Requires availability:read.',
+      inputSchema: z.object({
+        doctorId: z.string().min(1),
+        date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe('Date to check YYYY-MM-DD')
+      }),
+      annotations: { readOnlyHint: true }
+    },
+    wrap(checkDoctorAvailabilityTool(authInfo))
+  );
+
+  server.registerTool(
+    'get_appointment',
+    {
+      description: 'Get one appointment if the caller is allowed to see it. Requires appointment:read.',
+      inputSchema: z.object({
+        appointmentId: z.string().min(1)
+      }),
+      annotations: { readOnlyHint: true }
+    },
+    wrap(getAppointmentTool(authInfo))
+  );
+
+  server.registerTool(
+    'list_my_appointments',
+    {
+      description: 'List appointments for the connected patient or doctor. Requires appointment:read.',
+      inputSchema: z.object({
+        status: z.string().optional(),
+        date: z.string().optional()
+      }),
+      annotations: { readOnlyHint: true }
+    },
+    wrap(listMyAppointmentsTool(authInfo))
+  );
+
+  server.registerTool(
+    'list_doctor_appointment_requests',
+    {
+      description: 'List pending appointment requests for the connected doctor. Requires appointment:read.',
+      inputSchema: z.object({
+        date: z.string().optional(),
+        status: z.string().optional()
+      }),
+      annotations: { readOnlyHint: true }
+    },
+    wrap(listDoctorAppointmentRequestsTool(authInfo))
+  );
+
+  server.registerTool(
+    'admin_update_appointment',
+    {
+      description: 'Administrator updates any appointment status, date, or note. Requires appointment:update and admin role.',
+      inputSchema: z.object({
+        appointmentId: z.string().min(1),
+        date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+        status: z.string().optional(),
+        responseNote: z.string().optional()
+      })
+    },
+    wrap(adminUpdateAppointmentTool(authInfo))
+  );
+
+  server.registerTool(
+    'admin_get_dashboard_stats',
+    {
+      description: 'Administrator dashboard counts for doctors, patients, and appointments. Requires appointment:read and admin role.',
+      inputSchema: z.object({}),
+      annotations: { readOnlyHint: true }
+    },
+    wrap(adminGetDashboardStatsTool(authInfo))
   );
 
   return server;

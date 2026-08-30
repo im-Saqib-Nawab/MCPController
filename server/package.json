@@ -7,7 +7,7 @@
     "dev": "node --watch index.js",
     "start": "node index.js",
     "seed": "node seed/seed.js",
-    "test": "node --test --test-concurrency=1 --test-timeout=60000 ../tests/permissions.test.js ../tests/doctor.test.js ../tests/appointment.test.js ../tests/app.test.js"
+    "test": "node --test --test-concurrency=1 --test-timeout=60000 ../tests/permissions.test.js ../tests/doctor.test.js ../tests/appointment.test.js ../tests/mcp-flow.test.js ../tests/app.test.js"
   },
   "dependencies": {
     "@modelcontextprotocol/node": "^2.0.0",

@@ -92,6 +92,26 @@ function canViewAppointment(actor, appointment, actorDoctorId) {
   return false;
 }
 
+export async function listMyAppointments(actor, filters = {}) {
+  if (isAdmin(actor)) {
+    throw new AppError(403, 'forbidden', 'Administrators should use list_appointments with filters.');
+  }
+  return listAppointments(actor, filters);
+}
+
+export async function listDoctorAppointmentRequests(actor, filters = {}) {
+  if (!isDoctor(actor) && !isAdmin(actor)) {
+    throw new AppError(403, 'forbidden', 'Only doctors can list appointment requests.');
+  }
+
+  return listAppointments(actor, {
+    ...filters,
+    status: filters.status || undefined
+  }).then((rows) =>
+    filters.status ? rows : rows.filter((row) => ACTIVE_REQUEST_STATUSES.includes(row.status))
+  );
+}
+
 export async function listAppointments(actor, filters = {}) {
   const query = {};
   const doctor = await actorDoctor(actor);
@@ -138,14 +158,27 @@ function assertFutureDate(date) {
   }
 }
 
-export async function requestAppointment(actor, { doctorId, date }) {
-  if (!isPatient(actor) && !isAdmin(actor)) {
-    throw new AppError(403, 'forbidden', 'Only patients can request appointments.');
+function canRequestAppointments(actor) {
+  return isPatient(actor) || isDoctor(actor) || isAdmin(actor);
+}
+
+function resolveBookingPatientId(actor, explicitPatientId) {
+  if (explicitPatientId !== undefined && explicitPatientId !== null && String(explicitPatientId).trim()) {
+    if (!isAdmin(actor)) {
+      throw new AppError(403, 'forbidden', 'You cannot create an appointment for another patient.');
+    }
+    assertId(explicitPatientId, 'Patient');
+    return String(explicitPatientId);
   }
 
-  assertId(doctorId, 'Doctor');
-  assertFutureDate(date);
+  if (isAdmin(actor)) {
+    throw new AppError(400, 'invalid_request', 'Administrators must specify patientId when requesting appointments.');
+  }
 
+  return userId(actor);
+}
+
+async function assertBookableSlot(doctorId, date) {
   const doctor = await Doctor.findById(doctorId).lean();
   if (!doctor) {
     throw new AppError(404, 'not_found', 'Doctor not found.');
@@ -170,7 +203,91 @@ export async function requestAppointment(actor, { doctorId, date }) {
     );
   }
 
-  const patientId = isAdmin(actor) && actor.patientId ? actor.patientId : userId(actor);
+  return { doctor, weekday };
+}
+
+export async function checkDoctorAvailability(doctorId, date) {
+  assertId(doctorId, 'Doctor');
+  if (!isValidDateString(date)) {
+    throw new AppError(400, 'invalid_date', 'Date must be a valid YYYY-MM-DD value.');
+  }
+
+  const doctor = await Doctor.findById(doctorId).lean();
+  if (!doctor) {
+    throw new AppError(404, 'not_found', 'Doctor not found.');
+  }
+
+  const weekday = weekdayFromDate(date);
+  const weekly = normalizeWeeklyAvailability(doctor.weeklyAvailability);
+  const base = {
+    doctorId: String(doctorId),
+    doctorName: doctor.name,
+    date,
+    weekday,
+    weekdayLabel: weekdayLabel(weekday),
+    weeklyStanding: weekly[weekday]
+  };
+
+  if (date < todayUtcDateString()) {
+    return { ...base, available: false, reason: 'past_date', message: 'Appointments cannot be booked in the past.' };
+  }
+
+  if (weekly[weekday] !== 'available') {
+    return {
+      ...base,
+      available: false,
+      reason: 'doctor_unavailable',
+      message: `The doctor is marked unavailable on ${weekdayLabel(weekday)}.`
+    };
+  }
+
+  const existingAccepted = await Appointment.findOne({
+    doctorId,
+    date,
+    status: 'ACCEPTED'
+  }).lean();
+  if (existingAccepted) {
+    return {
+      ...base,
+      available: false,
+      reason: 'already_booked',
+      message: 'This day is already booked with another accepted appointment.'
+    };
+  }
+
+  return {
+    ...base,
+    available: true,
+    reason: null,
+    message: 'This day is available for a new appointment request.'
+  };
+}
+
+export async function requestAppointment(actor, { doctorId, date, patientId: explicitPatientId }) {
+  if (!canRequestAppointments(actor)) {
+    throw new AppError(403, 'forbidden', 'You cannot request appointments.');
+  }
+
+  assertId(doctorId, 'Doctor');
+  assertFutureDate(date);
+
+  if (isDoctor(actor)) {
+    const ownDoctor = await getDoctorByUserId(userId(actor));
+    if (ownDoctor && String(ownDoctor._id) === String(doctorId)) {
+      throw new AppError(403, 'forbidden', 'You cannot book an appointment with yourself.');
+    }
+  }
+
+  const patientId = resolveBookingPatientId(actor, explicitPatientId);
+  if (isAdmin(actor)) {
+    const patientUser = await User.findById(patientId).lean();
+    if (!patientUser || !['patient', 'user'].includes(patientUser.role)) {
+      throw new AppError(404, 'not_found', 'Patient not found.');
+    }
+  }
+
+  const { weekday } = await assertBookableSlot(doctorId, date);
+
   const duplicate = await Appointment.findOne({
     doctorId,
     patientId,
@@ -456,4 +573,11 @@ export async function dashboardStats() {
   ]);
 
   return { doctors, patients, pendingAppointments, todayAppointments };
+}
+
+export async function adminDashboardStats(actor) {
+  if (!isAdmin(actor)) {
+    throw new AppError(403, 'forbidden', 'Administrator access required.');
+  }
+  return dashboardStats();
 }

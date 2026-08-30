@@ -65,3 +65,43 @@ export function completeAppointmentTool(authInfo) {
     return toolResult(await appointmentService.completeAppointment(appointmentId, actor));
   };
 }
+
+export function getAppointmentTool(authInfo) {
+  return async ({ appointmentId }) => {
+    const actor = await getActor(authInfo);
+    assertToolAllowed('get_appointment', liveScopes(authInfo, actor));
+    return toolResult(await appointmentService.getAppointment(appointmentId, actor));
+  };
+}
+
+export function listMyAppointmentsTool(authInfo) {
+  return async (filters = {}) => {
+    const actor = await getActor(authInfo);
+    assertToolAllowed('list_my_appointments', liveScopes(authInfo, actor));
+    return toolResult(await appointmentService.listMyAppointments(actor, filters));
+  };
+}
+
+export function listDoctorAppointmentRequestsTool(authInfo) {
+  return async (filters = {}) => {
+    const actor = await getActor(authInfo);
+    assertToolAllowed('list_doctor_appointment_requests', liveScopes(authInfo, actor));
+    return toolResult(await appointmentService.listDoctorAppointmentRequests(actor, filters));
+  };
+}
+
+export function adminUpdateAppointmentTool(authInfo) {
+  return async ({ appointmentId, ...fields }) => {
+    const actor = await getActor(authInfo);
+    assertToolAllowed('admin_update_appointment', liveScopes(authInfo, actor));
+    return toolResult(await appointmentService.adminUpdateAppointment(appointmentId, fields, actor));
+  };
+}
+
+export function adminGetDashboardStatsTool(authInfo) {
+  return async () => {
+    const actor = await getActor(authInfo);
+    assertToolAllowed('admin_get_dashboard_stats', liveScopes(authInfo, actor));
+    return toolResult(await appointmentService.adminDashboardStats(actor));
+  };
+}
