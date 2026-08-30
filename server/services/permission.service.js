@@ -180,10 +180,22 @@ export function advertisedScopes() {
 }
 
 const ADMIN_ONLY_TOOLS = new Set(['admin_update_appointment', 'admin_get_dashboard_stats']);
+const LOG_TOOLS = new Set(['search_logs', 'get_request_logs']);
 
 export function isToolExposed(toolName, grantedScopes, role) {
   const required = TOOL_SCOPES[toolName];
-  if (!required || !hasScope(grantedScopes, required)) {
+  if (!required) {
+    return false;
+  }
+
+  if (LOG_TOOLS.has(toolName)) {
+    if (role === ROLES.ADMIN) {
+      return true;
+    }
+    return hasScope(grantedScopes, required);
+  }
+
+  if (!hasScope(grantedScopes, required)) {
     return false;
   }
 
@@ -192,6 +204,13 @@ export function isToolExposed(toolName, grantedScopes, role) {
   }
 
   return true;
+}
+
+export function assertLogToolAllowed(toolName, grantedScopes, role) {
+  if (role === ROLES.ADMIN) {
+    return;
+  }
+  assertToolAllowed(toolName, grantedScopes);
 }
 
 export function exposedToolNames(grantedScopes, role) {

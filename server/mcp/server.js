@@ -104,7 +104,7 @@ export function buildMcpServer(authInfo) {
     name: config.mcpServerName,
     version: config.mcpServerVersion,
     instructions:
-      'Doctor-patient appointment MCP for the full clinic system. Roles: admin (manage everything), doctor (own profile, availability, appointment requests), patient (browse doctors, book appointments). Appointment statuses: REQUESTED (pending), ACCEPTED, REJECTED, ALTERNATIVE_OFFERED, CANCELLED, COMPLETED. Backend rules: one accepted patient per doctor per day; cancelled/rejected days become available again; no self-booking; no past dates; no booking on unavailable weekdays. Tools are filtered to the scopes granted during OAuth. Use search_logs or get_request_logs (logs:read scope) to inspect stored server logs and trace issues by requestId.'
+      'Doctor-patient appointment MCP for the full clinic system. Roles: admin (manage everything), doctor (own profile, availability, appointment requests), patient (browse doctors, book appointments). Appointment statuses: REQUESTED (pending), ACCEPTED, REJECTED, ALTERNATIVE_OFFERED, CANCELLED, COMPLETED. Backend rules: one accepted patient per doctor per day; cancelled/rejected days become available again; no self-booking; no past dates; no booking on unavailable weekdays. Tools are filtered to the scopes granted during OAuth. Administrators always have search_logs and get_request_logs for debugging. Other roles need logs:read.'
   });
 
   function registerAllowed(toolName, definition, handler) {

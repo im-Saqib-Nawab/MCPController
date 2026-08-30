@@ -584,7 +584,8 @@ test('MCP tools/list only exposes tools allowed by granted scopes', async () => 
   assert.ok(toolNames.includes('get_doctor'));
   assert.equal(toolNames.includes('add_doctor'), false);
   assert.equal(toolNames.includes('request_appointment'), false);
-  assert.equal(toolNames.includes('search_logs'), false);
+  assert.ok(toolNames.includes('search_logs'));
+  assert.ok(toolNames.includes('get_request_logs'));
 });
 
 test('discovery documents are published', async () => {
