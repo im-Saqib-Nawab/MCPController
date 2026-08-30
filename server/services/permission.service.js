@@ -182,7 +182,7 @@ export function advertisedScopes() {
 const ADMIN_ONLY_TOOLS = new Set(['admin_update_appointment', 'admin_get_dashboard_stats']);
 const LOG_TOOLS = new Set(['search_logs', 'get_request_logs']);
 
-export function isToolExposed(toolName, grantedScopes, role) {
+export function isToolExposed(toolName, grantedScopes, role, effectiveScopes = grantedScopes) {
   const required = TOOL_SCOPES[toolName];
   if (!required) {
     return false;
@@ -192,7 +192,7 @@ export function isToolExposed(toolName, grantedScopes, role) {
     if (role === ROLES.ADMIN) {
       return true;
     }
-    return hasScope(grantedScopes, required);
+    return hasScope(effectiveScopes, required);
   }
 
   if (!hasScope(grantedScopes, required)) {
@@ -206,13 +206,20 @@ export function isToolExposed(toolName, grantedScopes, role) {
   return true;
 }
 
-export function assertLogToolAllowed(toolName, grantedScopes, role) {
+export function assertLogToolAllowed(toolName, grantedScopes, role, effectiveScopes = grantedScopes) {
   if (role === ROLES.ADMIN) {
     return;
   }
+
+  if (hasScope(effectiveScopes, 'logs:read')) {
+    return;
+  }
+
   assertToolAllowed(toolName, grantedScopes);
 }
 
-export function exposedToolNames(grantedScopes, role) {
-  return Object.keys(TOOL_SCOPES).filter((toolName) => isToolExposed(toolName, grantedScopes, role));
+export function exposedToolNames(grantedScopes, role, effectiveScopes = grantedScopes) {
+  return Object.keys(TOOL_SCOPES).filter((toolName) =>
+    isToolExposed(toolName, grantedScopes, role, effectiveScopes)
+  );
 }

@@ -98,17 +98,20 @@ function wrap(toolName, handler, authInfo) {
  */
 export function buildMcpServer(authInfo) {
   const grantedScopes = Array.isArray(authInfo?.scopes) ? authInfo.scopes : [];
+  const effectiveScopes = Array.isArray(authInfo?.extra?.effectiveScopes)
+    ? authInfo.extra.effectiveScopes
+    : grantedScopes;
   const role = authInfo?.extra?.role;
 
   const server = new McpServer({
     name: config.mcpServerName,
     version: config.mcpServerVersion,
     instructions:
-      'Doctor-patient appointment MCP for the full clinic system. Roles: admin (manage everything), doctor (own profile, availability, appointment requests), patient (browse doctors, book appointments). Appointment statuses: REQUESTED (pending), ACCEPTED, REJECTED, ALTERNATIVE_OFFERED, CANCELLED, COMPLETED. Backend rules: one accepted patient per doctor per day; cancelled/rejected days become available again; no self-booking; no past dates; no booking on unavailable weekdays. Tools are filtered to the scopes granted during OAuth. Administrators always have search_logs and get_request_logs for debugging. Other roles need logs:read.'
+      'Doctor-patient appointment MCP for the full clinic system. Roles: admin (manage everything), doctor (own profile, availability, appointment requests), patient (browse doctors, book appointments). Appointment statuses: REQUESTED (pending), ACCEPTED, REJECTED, ALTERNATIVE_OFFERED, CANCELLED, COMPLETED. Backend rules: one accepted patient per doctor per day; cancelled/rejected days become available again; no self-booking; no past dates; no booking on unavailable weekdays. Tools are filtered to OAuth token scopes. Log tools (search_logs, get_request_logs) follow website permissions: admins always have them; other users need Read system logs enabled in the admin dashboard.'
   });
 
   function registerAllowed(toolName, definition, handler) {
-    if (!isToolExposed(toolName, grantedScopes, role)) {
+    if (!isToolExposed(toolName, grantedScopes, role, effectiveScopes)) {
       return;
     }
 

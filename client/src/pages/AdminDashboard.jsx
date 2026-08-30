@@ -153,7 +153,9 @@ export default function AdminDashboard({ user }) {
   async function savePermissions(target) {
     try {
       await api.patch(`/admin/users/${target.id}/permissions`, { allowedScopes: target.allowedScopes });
-      setSuccess(`Updated permissions for ${target.email}. Existing MCP tokens were revoked.`);
+      setSuccess(
+        `Updated permissions for ${target.email}. Log tools update immediately. Other MCP tools may require reconnecting ChatGPT.`
+      );
       await load();
     } catch (err) {
       setError(getErrorMessage(err));

@@ -58,7 +58,11 @@ export async function requireMcpBearer(req, res, next) {
       scopes: liveScopes,
       expiresAt: Math.floor(record.expiresAt.getTime() / 1000),
       resource: new URL(record.resource),
-      extra: { userId: String(record.userId), role: user.role }
+      extra: {
+        userId: String(record.userId),
+        role: user.role,
+        effectiveScopes: allowed
+      }
     };
 
     logOperation('info', 'mcp.auth.validated', {
