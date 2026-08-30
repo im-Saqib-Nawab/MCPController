@@ -262,7 +262,7 @@ test('doctor tools honor read and write scopes and block delete without doctor:d
     .set('MCP-Protocol-Version', '2025-11-25')
     .send({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'update_doctor', arguments: { doctorId: createdDoctor.id, specialization: 'Internal Medicine' } } });
   assert.equal(updateRes.status, 200);
-  assert.match(JSON.stringify(mcpPayload(updateRes)), /Permission denied/i);
+  assert.match(JSON.stringify(mcpPayload(updateRes)), /Tool update_doctor not found/i);
 
   const deleteRes = await request(app)
     .post('/mcp')
@@ -272,7 +272,7 @@ test('doctor tools honor read and write scopes and block delete without doctor:d
     .set('MCP-Protocol-Version', '2025-11-25')
     .send({ jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'delete_doctor', arguments: { doctorId: createdDoctor.id } } });
   assert.equal(deleteRes.status, 200);
-  assert.match(JSON.stringify(mcpPayload(deleteRes)), /Permission denied/i);
+  assert.match(JSON.stringify(mcpPayload(deleteRes)), /Tool delete_doctor not found/i);
 });
 
 test('delete doctor works when doctor:delete is granted', async () => {
@@ -530,11 +530,61 @@ test('MCP exposes the full tool catalog', async () => {
   assert.equal(listToolsRes.status, 200);
   const payload = mcpPayload(listToolsRes);
   const toolNames = payload.result.tools.map((tool) => tool.name).sort();
-  assert.equal(toolNames.length, 27);
+  assert.equal(toolNames.length, 29);
   assert.ok(toolNames.includes('request_appointment'));
   assert.ok(toolNames.includes('check_doctor_availability'));
   assert.ok(toolNames.includes('list_doctor_appointment_requests'));
   assert.ok(toolNames.includes('admin_update_appointment'));
+});
+
+test('MCP tools/list only exposes tools allowed by granted scopes', async () => {
+  const client = await createClient('partial-tools-client');
+  const agent = request.agent(app);
+  await loginAdmin(agent);
+
+  const { verifier, challenge } = pkce();
+  const query = {
+    response_type: 'code',
+    client_id: client.clientId,
+    redirect_uri: client.redirectUris[0],
+    scope: 'doctor:read',
+    code_challenge: challenge,
+    code_challenge_method: 'S256',
+    resource: mcpResourceUrl()
+  };
+
+  const consent = await agent.post('/api/oauth/consent').send({
+    decision: 'allow',
+    scopes: ['doctor:read'],
+    query
+  });
+  const code = new URL(consent.body.redirectUrl).searchParams.get('code');
+
+  const tokenRes = await request(app).post('/oauth/token').type('form').send({
+    grant_type: 'authorization_code',
+    code,
+    redirect_uri: client.redirectUris[0],
+    client_id: client.clientId,
+    code_verifier: verifier,
+    resource: mcpResourceUrl()
+  });
+  const token = tokenRes.body.access_token;
+
+  const listToolsRes = await request(app)
+    .post('/mcp')
+    .set('Authorization', `Bearer ${token}`)
+    .set('Accept', 'application/json, text/event-stream')
+    .set('Content-Type', 'application/json')
+    .set('MCP-Protocol-Version', '2025-11-25')
+    .send({ jsonrpc: '2.0', id: 100, method: 'tools/list', params: {} });
+
+  assert.equal(listToolsRes.status, 200);
+  const toolNames = mcpPayload(listToolsRes).result.tools.map((tool) => tool.name);
+  assert.ok(toolNames.includes('list_doctors'));
+  assert.ok(toolNames.includes('get_doctor'));
+  assert.equal(toolNames.includes('add_doctor'), false);
+  assert.equal(toolNames.includes('request_appointment'), false);
+  assert.equal(toolNames.includes('search_logs'), false);
 });
 
 test('discovery documents are published', async () => {

@@ -1,6 +1,7 @@
 import { Connection } from '../models/Connection.js';
 import { AccessToken } from '../models/AccessToken.js';
 import { User } from '../models/User.js';
+import { logOperation } from '../lib/request-context.js';
 
 export async function listConnections(req, res, next) {
   try {
@@ -21,6 +22,12 @@ export async function revokeConnection(req, res, next) {
     const { clientId } = req.params;
     await Connection.deleteOne({ userId: req.user._id, clientId });
     await AccessToken.updateMany({ userId: req.user._id, clientId }, { revoked: true });
+
+    logOperation('info', 'oauth.connection.revoked', {
+      userId: String(req.user._id),
+      clientId
+    });
+
     res.json({ ok: true });
   } catch (err) {
     next(err);

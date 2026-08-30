@@ -26,6 +26,7 @@ import {
 } from './controllers/oauth.controller.js';
 
 import { errorMiddleware } from './middleware/error.middleware.js';
+import { requestLogMiddleware } from './middleware/request-log.middleware.js';
 
 const app = express();
 
@@ -152,6 +153,12 @@ app.use(
 );
 
 app.use(cookieParser());
+
+/* -------------------------------------------------------------------------- */
+/* Request logging & correlation IDs                                          */
+/* -------------------------------------------------------------------------- */
+
+app.use(requestLogMiddleware);
 
 /* -------------------------------------------------------------------------- */
 /* Database Middleware (Runs before all routes)                                */

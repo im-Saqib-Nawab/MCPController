@@ -12,6 +12,7 @@ import {
 import { config } from '../config/env.js';
 
 import { AppError } from '../middleware/error.middleware.js';
+import { logError, logOperation, getRequestContext } from '../lib/request-context.js';
 
 /* -------------------------------------------------------------------------- */
 /* OAuth error helper                                                         */
@@ -23,6 +24,14 @@ function sendOAuthError(res, err) {
       ? err.status
       : 400;
 
+  const ctx = getRequestContext();
+
+  logError(err, {
+    operation: 'oauth.error',
+    statusCode: status,
+    errorCode: err?.code || 'invalid_request'
+  });
+
   return res
     .status(status)
     .json({
@@ -32,7 +41,9 @@ function sendOAuthError(res, err) {
 
       error_description:
         err?.message ||
-        'OAuth request failed.'
+        'OAuth request failed.',
+
+      request_id: ctx?.requestId
     });
 }
 
@@ -40,7 +51,11 @@ function sendOAuthError(res, err) {
 /* Authorization Server Metadata                                              */
 /* -------------------------------------------------------------------------- */
 
-export function metadata(_req, res) {
+export function metadata(req, res) {
+  logOperation('debug', 'oauth.discovery.authorization_server', {
+    route: req.path
+  });
+
   return res
     .status(200)
     .json(
@@ -52,7 +67,11 @@ export function metadata(_req, res) {
 /* Protected Resource Metadata                                                */
 /* -------------------------------------------------------------------------- */
 
-export function resourceMetadata(_req, res) {
+export function resourceMetadata(req, res) {
+  logOperation('debug', 'oauth.discovery.protected_resource', {
+    route: req.path
+  });
+
   return res
     .status(200)
     .json(
@@ -75,6 +94,10 @@ export async function register(
         req.body || {}
       );
 
+    logOperation('info', 'oauth.client.registered', {
+      clientId: created.client_id
+    });
+
     return res
       .status(201)
       .json(created);
@@ -94,6 +117,10 @@ export async function revoke(
   try {
     const result =
       await revokeToken(req);
+
+    logOperation('info', 'oauth.token.revoke.requested', {
+      revoked: result.revoked
+    });
 
     return res.json(result);
   } catch (err) {
@@ -159,6 +186,11 @@ export async function consent(
           query
         );
 
+      logOperation('info', 'oauth.consent.denied', {
+        userId: String(req.user._id),
+        clientId: query?.client_id
+      });
+
       return res.json(
         denied
       );
@@ -191,6 +223,12 @@ export async function consent(
           scopes
       });
 
+    logOperation('info', 'oauth.consent.allowed', {
+      userId: String(req.user._id),
+      clientId: query?.client_id,
+      scopeCount: Array.isArray(scopes) ? scopes.length : undefined
+    });
+
     return res.json(
       result
     );
@@ -220,6 +258,10 @@ export async function token(
   try {
     const tokens =
       await exchangeToken(req);
+
+    logOperation('info', 'oauth.token.exchange.completed', {
+      grantType: req.body?.grant_type
+    });
 
     return res
       .status(200)
@@ -263,12 +305,25 @@ function buildLoginPath(query = {}) {
  */
 export function authorizeBridge(req, res) {
   try {
+    const clientId = req.query?.client_id;
+
     if (req.user) {
+      logOperation('info', 'oauth.authorize.redirect_consent', {
+        userId: String(req.user._id),
+        clientId
+      });
+
       return res.redirect(302, buildConsentPath(req.query));
     }
 
+    logOperation('info', 'oauth.authorize.redirect_login', {
+      clientId
+    });
+
     return res.redirect(302, buildLoginPath(req.query));
   } catch (err) {
+    logError(err, { operation: 'oauth.authorize.failed' });
+
     return sendOAuthError(
       res,
       new AppError(400, 'invalid_request', 'Unable to start authorization.')

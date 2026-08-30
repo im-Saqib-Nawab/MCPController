@@ -14,5 +14,6 @@ export const SCOPE_OPTIONS = [
   { value: 'availability:read', label: 'Read availability' },
   { value: 'availability:update', label: 'Update availability' },
   { value: 'profile:read', label: 'Read profile' },
-  { value: 'profile:update', label: 'Update profile' }
+  { value: 'profile:update', label: 'Update profile' },
+  { value: 'logs:read', label: 'Read system logs' }
 ];

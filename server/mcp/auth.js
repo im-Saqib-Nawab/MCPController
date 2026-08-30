@@ -4,6 +4,7 @@ import { resolveAccessToken } from '../services/token.service.js';
 import { getEffectiveAllowedScopes } from '../services/auth.service.js';
 import { User } from '../models/User.js';
 import { AppError } from '../middleware/error.middleware.js';
+import { logError, logOperation } from '../lib/request-context.js';
 
 function challenge() {
   const metadata = `${config.apiUrl}/.well-known/oauth-protected-resource`;
@@ -59,8 +60,24 @@ export async function requireMcpBearer(req, res, next) {
       resource: new URL(record.resource),
       extra: { userId: String(record.userId), role: user.role }
     };
+
+    logOperation('info', 'mcp.auth.validated', {
+      userId: String(record.userId),
+      clientId: record.clientId,
+      role: user.role,
+      scopeCount: liveScopes.length
+    });
+
     next();
   } catch (err) {
+    if (!(err instanceof AppError)) {
+      logError(err, { operation: 'mcp.auth.failed' });
+    } else {
+      logOperation('warn', 'mcp.auth.rejected', {
+        errorCode: err.code,
+        message: err.message
+      });
+    }
     next(err);
   }
 }

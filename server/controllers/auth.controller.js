@@ -8,6 +8,7 @@ import {
   updateOwnProfile
 } from '../services/auth.service.js';
 import { AppError } from '../middleware/error.middleware.js';
+import { logError, logOperation } from '../lib/request-context.js';
 
 const credentialsSchema = z.object({
   email: z.string().email(),
@@ -48,8 +49,15 @@ export async function register(req, res, next) {
     const parsed = parseOrThrow(registerSchema, req.body);
     const user = await registerUser(parsed);
     setSessionCookie(res, user);
+
+    logOperation('info', 'auth.register.completed', {
+      userId: String(user.id || user._id),
+      role: user.role
+    });
+
     res.status(201).json({ user });
   } catch (err) {
+    logError(err, { operation: 'auth.register.failed' });
     next(err);
   }
 }
@@ -59,13 +67,24 @@ export async function login(req, res, next) {
     const parsed = parseOrThrow(credentialsSchema, req.body);
     const user = await loginUser(parsed);
     setSessionCookie(res, user);
+
+    logOperation('info', 'auth.login.completed', {
+      userId: String(user.id || user._id),
+      role: user.role
+    });
+
     res.json({ user });
   } catch (err) {
+    logError(err, { operation: 'auth.login.failed' });
     next(err);
   }
 }
 
 export function logout(req, res) {
+  logOperation('info', 'auth.logout.completed', {
+    userId: req.user?._id ? String(req.user._id) : undefined
+  });
+
   clearSessionCookie(res);
   res.json({ ok: true });
 }

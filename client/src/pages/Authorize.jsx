@@ -31,10 +31,7 @@ export default function Authorize({ user }) {
         if (cancelled) return;
 
         setPreview(data);
-        const requestedScopes = data.scopes
-          .filter((scope) => scope?.requested)
-          .map((scope) => scope.value);
-        setSelected([...new Set(requestedScopes.length ? requestedScopes : data.scopes.map((s) => s.value))]);
+        setSelected(data.scopes.map((scope) => scope.value));
       } catch (err) {
         if (!cancelled) {
           setError(getErrorMessage(err));
@@ -142,8 +139,8 @@ export default function Authorize({ user }) {
           ChatGPT is requesting access
         </h1>
         <p className="mt-3 text-sm text-slate-600">
-          You are authorizing as <strong>{roleLabel}</strong> ({user.email}). Only permissions your account
-          is allowed to grant are shown below.
+          You are authorizing as <strong>{roleLabel}</strong> ({user.email}). All permissions your
+          account can grant are pre-selected so ChatGPT receives a clean, successful connection.
         </p>
 
         <div className="mt-4 rounded-lg bg-slate-50 px-4 py-3">

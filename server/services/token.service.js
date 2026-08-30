@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { AccessToken } from '../models/AccessToken.js';
 import { config } from '../config/env.js';
+import { logOperation } from '../lib/request-context.js';
 
 /* -------------------------------------------------------------------------- */
 /* Crypto & Token Helpers                                                     */
@@ -69,6 +70,13 @@ export async function issueTokens({ userId, clientId, scopes, resource }) {
     expiresAt: accessExpiresAt,
     refreshExpiresAt,
     revoked: false
+  });
+
+  logOperation('info', 'oauth.token.stored', {
+    userId: String(userId),
+    clientId,
+    scopeCount: uniqueScopes.length,
+    expiresInSeconds: config.accessTokenTtlSeconds
   });
 
   return {

@@ -39,6 +39,7 @@ export const config = {
   refreshTokenTtlSeconds: Number(process.env.REFRESH_TOKEN_TTL_SECONDS) || 2592000,
   mcpServerName: process.env.MCP_SERVER_NAME || 'MCPController',
   mcpServerVersion: process.env.MCP_SERVER_VERSION || '1.1.0',
+  logLevel: process.env.LOG_LEVEL || (isProduction ? 'info' : 'debug'),
   cookieName: 'mcpcontroller_session',
   scopes: [
     'doctor:read',
@@ -55,8 +56,9 @@ export const config = {
     'appointment:delete',
     'availability:read',
     'availability:update',
-    'profile:read',
-    'profile:update'
+  'profile:read',
+  'profile:update',
+  'logs:read'
   ],
   rootDir: root,
   serverDir,

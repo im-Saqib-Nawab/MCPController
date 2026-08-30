@@ -12,6 +12,7 @@ import {
 } from '../config/env.js';
 
 import { AppError } from '../middleware/error.middleware.js';
+import { logOperation } from '../lib/request-context.js';
 import { getEffectiveAllowedScopes } from './auth.service.js';
 import {
   ACCEPTED_REQUEST_SCOPES,
@@ -75,6 +76,30 @@ export function parseScopes(scope) {
 
   const expanded = expandLegacyScopes(requested);
 
+  return expanded.length ? expanded : [...config.scopes];
+}
+
+export function parseScopesForAuthorize(scope) {
+  if (!scope) {
+    return [...config.scopes];
+  }
+
+  const requested = String(scope)
+    .split(/[\s+,]+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .filter((item) => item !== 'offline_access' && item !== 'openid');
+
+  const known = requested.filter((item) => ACCEPTED_REQUEST_SCOPES.includes(item));
+  const unknown = requested.filter((item) => !ACCEPTED_REQUEST_SCOPES.includes(item));
+
+  if (unknown.length) {
+    logOperation('warn', 'oauth.scope.ignored', {
+      ignoredScopeCount: unknown.length
+    });
+  }
+
+  const expanded = expandLegacyScopes(known);
   return expanded.length ? expanded : [...config.scopes];
 }
 
@@ -665,7 +690,7 @@ export function validateAuthorizeParams(query = {}) {
 
     redirectUri,
 
-    scopes: parseScopes(scope),
+    scopes: parseScopesForAuthorize(scope),
     rawRequestedScopes: parseRequestedScopes(scope),
 
     state,
@@ -817,6 +842,13 @@ export async function createAuthorizationCode({
     redirect.searchParams.set('state', params.state);
   }
 
+  logOperation('info', 'oauth.authorization_code.created', {
+    userId: String(user._id),
+    clientId: client.clientId,
+    scopeCount: scopes.length,
+    resource: params.resource
+  });
+
   return {
     redirectUrl: redirect.toString(),
     code
@@ -951,6 +983,10 @@ export async function exchangeToken(req) {
     const tokens = await rotateRefreshToken(refreshToken);
 
     if (!tokens) {
+      logOperation('warn', 'oauth.token.refresh.invalid', {
+        clientId: client.clientId
+      });
+
       throw new AppError(
         400,
         'invalid_grant',
@@ -962,12 +998,20 @@ export async function exchangeToken(req) {
       tokens.clientId &&
       tokens.clientId !== client.clientId
     ) {
+      logOperation('warn', 'oauth.token.refresh.client_mismatch', {
+        clientId: client.clientId
+      });
+
       throw new AppError(
         400,
         'invalid_grant',
         'Refresh token does not belong to this client.'
       );
     }
+
+    logOperation('info', 'oauth.token.refresh.completed', {
+      clientId: client.clientId
+    });
 
     return tokens;
   }
@@ -1018,11 +1062,18 @@ export async function exchangeToken(req) {
   if (!record) {
     const existing = await AuthorizationCode.findOne({ codeHash: hashToken(code) }).lean();
     if (existing?.used) {
+      logOperation('warn', 'oauth.authorization_code.reused', {
+        clientId: existing.clientId
+      });
       throw new AppError(400, 'invalid_grant', 'Authorization code has already been used.');
     }
     if (existing && existing.expiresAt.getTime() <= Date.now()) {
+      logOperation('warn', 'oauth.authorization_code.expired', {
+        clientId: existing.clientId
+      });
       throw new AppError(400, 'invalid_grant', 'Authorization code has expired.');
     }
+    logOperation('warn', 'oauth.authorization_code.invalid', {});
     throw new AppError(400, 'invalid_grant', 'Invalid authorization code');
   }
 
@@ -1069,6 +1120,11 @@ export async function exchangeToken(req) {
   );
 
   if (expected !== actual) {
+    logOperation('warn', 'oauth.pkce.verification_failed', {
+      clientId: record.clientId,
+      userId: String(record.userId)
+    });
+
     throw new AppError(
       400,
       'invalid_grant',
@@ -1076,12 +1132,20 @@ export async function exchangeToken(req) {
     );
   }
 
-  return issueTokens({
+  const tokens = await issueTokens({
     userId: record.userId,
     clientId: record.clientId,
     scopes: record.scopes,
     resource: record.resource
   });
+
+  logOperation('info', 'oauth.token.authorization_code.exchanged', {
+    userId: String(record.userId),
+    clientId: record.clientId,
+    scopeCount: record.scopes.length
+  });
+
+  return tokens;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1125,6 +1189,11 @@ export async function revokeToken(req) {
 
   await Connection.deleteOne({
     userId: record.userId,
+    clientId: record.clientId
+  });
+
+  logOperation('info', 'oauth.token.revoked', {
+    userId: String(record.userId),
     clientId: record.clientId
   });
 

@@ -1,4 +1,5 @@
 import { AppError } from '../middleware/error.middleware.js';
+import { logOperation } from '../lib/request-context.js';
 import { config } from '../config/env.js';
 import { ROLES } from '../lib/roles.js';
 
@@ -22,6 +23,7 @@ export const SCOPE_LABELS = {
   'availability:update': 'Update availability',
   'profile:read': 'Read own profile',
   'profile:update': 'Update own profile',
+  'logs:read': 'Read system logs',
   [LEGACY_WRITE_SCOPE]: 'Add & update doctors'
 };
 
@@ -77,7 +79,9 @@ export const TOOL_SCOPES = {
   check_doctor_availability: 'availability:read',
   update_availability: 'availability:update',
   get_my_profile: 'profile:read',
-  update_my_profile: 'profile:update'
+  update_my_profile: 'profile:update',
+  search_logs: 'logs:read',
+  get_request_logs: 'logs:read'
 };
 
 export const ACCEPTED_REQUEST_SCOPES = [...config.scopes, LEGACY_WRITE_SCOPE];
@@ -144,6 +148,11 @@ export function hasScope(grantedScopes, required) {
 
 export function requireScope(grantedScopes, required) {
   if (!hasScope(grantedScopes, required)) {
+    logOperation('warn', 'permission.denied', {
+      requiredScope: required,
+      grantedScopeCount: Array.isArray(grantedScopes) ? grantedScopes.length : 0
+    });
+
     throw new AppError(
       403,
       'permission_denied',
@@ -155,6 +164,7 @@ export function requireScope(grantedScopes, required) {
 export function assertToolAllowed(toolName, grantedScopes) {
   const required = TOOL_SCOPES[toolName];
   if (!required) {
+    logOperation('warn', 'permission.tool_unknown', { tool: toolName });
     throw new AppError(400, 'tool_not_allowed', `Unknown tool: ${toolName}`);
   }
   requireScope(grantedScopes, required);
@@ -167,4 +177,23 @@ export function filterScopesByUserAllowed(requestedScopes, userAllowedScopes) {
 
 export function advertisedScopes() {
   return [...config.scopes, LEGACY_WRITE_SCOPE];
+}
+
+const ADMIN_ONLY_TOOLS = new Set(['admin_update_appointment', 'admin_get_dashboard_stats']);
+
+export function isToolExposed(toolName, grantedScopes, role) {
+  const required = TOOL_SCOPES[toolName];
+  if (!required || !hasScope(grantedScopes, required)) {
+    return false;
+  }
+
+  if (ADMIN_ONLY_TOOLS.has(toolName) && role !== ROLES.ADMIN) {
+    return false;
+  }
+
+  return true;
+}
+
+export function exposedToolNames(grantedScopes, role) {
+  return Object.keys(TOOL_SCOPES).filter((toolName) => isToolExposed(toolName, grantedScopes, role));
 }

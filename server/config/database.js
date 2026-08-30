@@ -1,5 +1,7 @@
 import mongoose from 'mongoose';
 import { config } from './env.js';
+import { logOperation } from '../lib/request-context.js';
+import { logger } from '../lib/logger.js';
 
 /**
  * MongoDB connection cache for local development and Vercel serverless isolates.
@@ -53,8 +55,15 @@ export async function connectDatabase(uri = config.mongodbUri) {
   });
 
   try {
+    const connectStart = Date.now();
     await cache.promise;
     await syncCollectionIndexes();
+
+    logOperation('debug', 'db.connected', {
+      durationMs: Date.now() - connectStart,
+      readyState: mongoose.connection.readyState
+    });
+
     return mongoose.connection;
   } catch (err) {
     /*
@@ -62,6 +71,18 @@ export async function connectDatabase(uri = config.mongodbUri) {
      */
     cache.promise = null;
     cache.uri = null;
+
+    logger.error(
+      {
+        operation: 'db.connection.failed',
+        err: {
+          name: err.name,
+          message: err.message,
+          stack: err.stack
+        }
+      },
+      'MongoDB connection failed'
+    );
 
     throw err;
   }

@@ -76,6 +76,7 @@ Revoking a connection from the dashboard (or calling `POST /oauth/revoke`) immed
 | `availability:read` | `check_doctor_availability` (also included in `get_doctor` / `list_doctors`) |
 | `availability:update` | `update_availability` |
 | `profile:read` / `profile:update` | `get_my_profile`, `update_my_profile` |
+| `logs:read` | `search_logs`, `get_request_logs` |
 
 Permissions are enforced in three places:
 
@@ -83,7 +84,7 @@ Permissions are enforced in three places:
 2. **OAuth consent** — only scopes the user is allowed to grant can be selected.
 3. **MCP tools** — every tool call checks the access token scopes again.
 
-### Complete MCP tool list (27 tools)
+### Complete MCP tool list (29 tools)
 
 | Category | Tools |
 | --- | --- |
@@ -93,8 +94,9 @@ Permissions are enforced in three places:
 | **Appointments** | `list_appointments`, `list_my_appointments`, `list_doctor_appointment_requests`, `get_appointment`, `request_appointment`, `accept_appointment`, `reject_appointment`, `suggest_alternative_date`, `accept_alternative_date`, `cancel_appointment`, `complete_appointment` |
 | **Admin** | `admin_update_appointment`, `admin_get_dashboard_stats` |
 | **Profile** | `get_my_profile`, `update_my_profile` |
+| **Logs** | `search_logs`, `get_request_logs` |
 
-**ChatGPT tip:** If you only see a few doctor tools, reconnect and grant the scopes you need on the consent screen (appointments, patients, availability, profile). Tools are filtered by the scopes granted during OAuth — not by role alone.
+**ChatGPT tip:** If you only see a few doctor tools, reconnect and grant the scopes you need on the consent screen (appointments, patients, availability, profile, logs). Tools are filtered by the scopes granted during OAuth — not by role alone. Only tools your token can access appear in `tools/list`.
 
 ## Doctor model
 
@@ -152,6 +154,8 @@ Vite proxies `/api`, `/oauth/token`, `/oauth/register`, `/mcp`, and `/.well-know
 npm test
 npm run build
 ```
+
+See [OBSERVABILITY.md](./OBSERVABILITY.md) for logging, correlation IDs, and debugging OAuth/MCP issues.
 
 ## Vercel deployment
 

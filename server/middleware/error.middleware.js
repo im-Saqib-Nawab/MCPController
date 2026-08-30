@@ -1,3 +1,6 @@
+import { logError } from '../lib/request-context.js';
+import { config } from '../config/env.js';
+
 export class AppError extends Error {
   constructor(status, code, message, details) {
     super(message);
@@ -9,7 +12,7 @@ export class AppError extends Error {
 
 export function errorMiddleware(err, req, res, next) {
   void next;
-  const isProd = process.env.NODE_ENV === 'production';
+
   let status = err.status || 500;
   let code = err.code || 'server_error';
   let message = err.message;
@@ -20,13 +23,25 @@ export function errorMiddleware(err, req, res, next) {
     message = 'Invalid id.';
   }
 
-  if (status >= 500) {
-    console.error(err);
+  logError(err, {
+    operation: 'http.error',
+    method: req.method,
+    route: req.path,
+    statusCode: status,
+    errorCode: code,
+    userId: req.user?._id ? String(req.user._id) : req.auth?.extra?.userId,
+    clientId: req.auth?.clientId
+  });
+
+  const body = {
+    error: code,
+    message: status >= 500 && config.isProduction ? 'An unexpected error occurred.' : message,
+    requestId: req.requestId
+  };
+
+  if (!config.isProduction && err.details !== undefined) {
+    body.details = err.details;
   }
 
-  res.status(status).json({
-    error: code,
-    message: status >= 500 && isProd ? 'An unexpected error occurred.' : message,
-    details: isProd ? undefined : err.details
-  });
+  res.status(status).json(body);
 }

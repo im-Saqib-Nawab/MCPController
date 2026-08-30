@@ -1,6 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/server';
 import * as z from 'zod/v4';
 import { config } from '../config/env.js';
+import { logError, logOperation } from '../lib/request-context.js';
 import { listDoctorsTool } from './tools/listDoctors.tool.js';
 import { getDoctorTool } from './tools/getDoctor.tool.js';
 import { addDoctorTool } from './tools/addDoctor.tool.js';
@@ -30,6 +31,8 @@ import {
 } from './tools/appointment.tools.js';
 import { getMyProfileTool, updateMyProfileTool, updateAvailabilityTool } from './tools/profile.tools.js';
 import { checkDoctorAvailabilityTool } from './tools/availability.tools.js';
+import { searchLogsTool, getRequestLogsTool } from './tools/logs.tools.js';
+import { isToolExposed } from '../services/permission.service.js';
 
 const weeklyAvailabilitySchema = z
   .object({
@@ -50,11 +53,37 @@ function errorResult(err) {
   };
 }
 
-function wrap(handler) {
+function wrap(toolName, handler, authInfo) {
   return async (args) => {
+    const start = Date.now();
+    const actor = {
+      userId: authInfo?.extra?.userId,
+      clientId: authInfo?.clientId,
+      role: authInfo?.extra?.role
+    };
+
+    logOperation('info', 'mcp.tool.started', { tool: toolName, ...actor });
+
     try {
-      return await handler(args || {});
+      const result = await handler(args || {});
+      const durationMs = Date.now() - start;
+      const failed = Boolean(result?.isError);
+
+      logOperation(failed ? 'warn' : 'info', failed ? 'mcp.tool.failed' : 'mcp.tool.completed', {
+        tool: toolName,
+        durationMs,
+        success: !failed,
+        ...actor
+      });
+
+      return result;
     } catch (err) {
+      logError(err, {
+        operation: 'mcp.tool.error',
+        tool: toolName,
+        durationMs: Date.now() - start,
+        ...actor
+      });
       return errorResult(err);
     }
   };
@@ -68,24 +97,35 @@ function wrap(handler) {
  * authInfo comes from requireMcpBearer → req.auth → toNodeHandler.
  */
 export function buildMcpServer(authInfo) {
+  const grantedScopes = Array.isArray(authInfo?.scopes) ? authInfo.scopes : [];
+  const role = authInfo?.extra?.role;
+
   const server = new McpServer({
     name: config.mcpServerName,
     version: config.mcpServerVersion,
     instructions:
-      'Doctor-patient appointment MCP for the full clinic system. Roles: admin (manage everything), doctor (own profile, availability, appointment requests), patient (browse doctors, book appointments). Appointment statuses: REQUESTED (pending), ACCEPTED, REJECTED, ALTERNATIVE_OFFERED, CANCELLED, COMPLETED. Backend rules: one accepted patient per doctor per day; cancelled/rejected days become available again; no self-booking; no past dates; no booking on unavailable weekdays. Every tool checks OAuth scopes, role, and ownership.'
+      'Doctor-patient appointment MCP for the full clinic system. Roles: admin (manage everything), doctor (own profile, availability, appointment requests), patient (browse doctors, book appointments). Appointment statuses: REQUESTED (pending), ACCEPTED, REJECTED, ALTERNATIVE_OFFERED, CANCELLED, COMPLETED. Backend rules: one accepted patient per doctor per day; cancelled/rejected days become available again; no self-booking; no past dates; no booking on unavailable weekdays. Tools are filtered to the scopes granted during OAuth. Use search_logs or get_request_logs (logs:read scope) to inspect stored server logs and trace issues by requestId.'
   });
 
-  server.registerTool(
+  function registerAllowed(toolName, definition, handler) {
+    if (!isToolExposed(toolName, grantedScopes, role)) {
+      return;
+    }
+
+    server.registerTool(toolName, definition, wrap(toolName, handler, authInfo));
+  }
+
+  registerAllowed(
     'list_doctors',
     {
       description: 'List doctors, weekly availability, and next available dates. Requires doctor:read.',
       inputSchema: z.object({}),
       annotations: { readOnlyHint: true }
     },
-    wrap(listDoctorsTool(authInfo))
+    listDoctorsTool(authInfo)
   );
 
-  server.registerTool(
+  registerAllowed(
     'get_doctor',
     {
       description: 'Return one doctor and their schedule. Requires doctor:read.',
@@ -94,10 +134,10 @@ export function buildMcpServer(authInfo) {
       }),
       annotations: { readOnlyHint: true }
     },
-    wrap(getDoctorTool(authInfo))
+    getDoctorTool(authInfo)
   );
 
-  server.registerTool(
+  registerAllowed(
     'add_doctor',
     {
       description: 'Create a doctor record. Requires doctor:create. Admin-only ownership rule.',
@@ -110,10 +150,10 @@ export function buildMcpServer(authInfo) {
         weeklyAvailability: weeklyAvailabilitySchema
       })
     },
-    wrap(addDoctorTool(authInfo))
+    addDoctorTool(authInfo)
   );
 
-  server.registerTool(
+  registerAllowed(
     'update_doctor',
     {
       description: 'Update a doctor. Requires doctor:update. Doctors may only update themselves.',
@@ -127,10 +167,10 @@ export function buildMcpServer(authInfo) {
         weeklyAvailability: weeklyAvailabilitySchema
       })
     },
-    wrap(updateDoctorTool(authInfo))
+    updateDoctorTool(authInfo)
   );
 
-  server.registerTool(
+  registerAllowed(
     'delete_doctor',
     {
       description: 'Delete a doctor. Requires doctor:delete. Admin only.',
@@ -138,20 +178,20 @@ export function buildMcpServer(authInfo) {
         doctorId: z.string().min(1).describe('MongoDB id of the doctor')
       })
     },
-    wrap(deleteDoctorTool(authInfo))
+    deleteDoctorTool(authInfo)
   );
 
-  server.registerTool(
+  registerAllowed(
     'list_patients',
     {
       description: 'List patients visible to the caller. Requires patient:read.',
       inputSchema: z.object({}),
       annotations: { readOnlyHint: true }
     },
-    wrap(listPatientsTool(authInfo))
+    listPatientsTool(authInfo)
   );
 
-  server.registerTool(
+  registerAllowed(
     'get_patient',
     {
       description: 'Get one patient if the caller is allowed to see them. Requires patient:read.',
@@ -160,10 +200,10 @@ export function buildMcpServer(authInfo) {
       }),
       annotations: { readOnlyHint: true }
     },
-    wrap(getPatientTool(authInfo))
+    getPatientTool(authInfo)
   );
 
-  server.registerTool(
+  registerAllowed(
     'add_patient',
     {
       description: 'Create a patient account. Requires patient:create. Admin only.',
@@ -177,10 +217,10 @@ export function buildMcpServer(authInfo) {
         bio: z.string().optional()
       })
     },
-    wrap(addPatientTool(authInfo))
+    addPatientTool(authInfo)
   );
 
-  server.registerTool(
+  registerAllowed(
     'update_patient',
     {
       description: 'Update a patient. Requires patient:update. Patients may only update themselves.',
@@ -193,10 +233,10 @@ export function buildMcpServer(authInfo) {
         bio: z.string().optional()
       })
     },
-    wrap(updatePatientTool(authInfo))
+    updatePatientTool(authInfo)
   );
 
-  server.registerTool(
+  registerAllowed(
     'delete_patient',
     {
       description: 'Delete a patient. Requires patient:delete. Admin only.',
@@ -204,10 +244,10 @@ export function buildMcpServer(authInfo) {
         patientId: z.string().min(1)
       })
     },
-    wrap(deletePatientTool(authInfo))
+    deletePatientTool(authInfo)
   );
 
-  server.registerTool(
+  registerAllowed(
     'list_appointments',
     {
       description: 'List appointments visible to the caller. Requires appointment:read.',
@@ -219,10 +259,10 @@ export function buildMcpServer(authInfo) {
       }),
       annotations: { readOnlyHint: true }
     },
-    wrap(listAppointmentsTool(authInfo))
+    listAppointmentsTool(authInfo)
   );
 
-  server.registerTool(
+  registerAllowed(
     'request_appointment',
     {
       description: 'Patient requests an appointment on an available date. Requires appointment:create.',
@@ -231,10 +271,10 @@ export function buildMcpServer(authInfo) {
         date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe('Appointment date YYYY-MM-DD')
       })
     },
-    wrap(requestAppointmentTool(authInfo))
+    requestAppointmentTool(authInfo)
   );
 
-  server.registerTool(
+  registerAllowed(
     'accept_appointment',
     {
       description: 'Doctor accepts one request for a day. Other same-day requests are rejected with alternatives. Requires appointment:update.',
@@ -242,10 +282,10 @@ export function buildMcpServer(authInfo) {
         appointmentId: z.string().min(1)
       })
     },
-    wrap(acceptAppointmentTool(authInfo))
+    acceptAppointmentTool(authInfo)
   );
 
-  server.registerTool(
+  registerAllowed(
     'reject_appointment',
     {
       description: 'Doctor rejects a request and may offer alternative dates. Requires appointment:update.',
@@ -255,10 +295,10 @@ export function buildMcpServer(authInfo) {
         suggestedDates: z.array(z.string()).optional()
       })
     },
-    wrap(rejectAppointmentTool(authInfo))
+    rejectAppointmentTool(authInfo)
   );
 
-  server.registerTool(
+  registerAllowed(
     'suggest_alternative_date',
     {
       description: 'Doctor suggests one or more alternative dates. Requires appointment:update.',
@@ -268,10 +308,10 @@ export function buildMcpServer(authInfo) {
         note: z.string().optional()
       })
     },
-    wrap(suggestAlternativeDateTool(authInfo))
+    suggestAlternativeDateTool(authInfo)
   );
 
-  server.registerTool(
+  registerAllowed(
     'accept_alternative_date',
     {
       description: 'Patient accepts a suggested alternative date. Requires appointment:update.',
@@ -280,10 +320,10 @@ export function buildMcpServer(authInfo) {
         date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
       })
     },
-    wrap(acceptAlternativeDateTool(authInfo))
+    acceptAlternativeDateTool(authInfo)
   );
 
-  server.registerTool(
+  registerAllowed(
     'cancel_appointment',
     {
       description: 'Cancel an appointment the caller owns. Requires appointment:update.',
@@ -291,10 +331,10 @@ export function buildMcpServer(authInfo) {
         appointmentId: z.string().min(1)
       })
     },
-    wrap(cancelAppointmentTool(authInfo))
+    cancelAppointmentTool(authInfo)
   );
 
-  server.registerTool(
+  registerAllowed(
     'complete_appointment',
     {
       description: 'Mark a confirmed appointment as completed. Requires appointment:update.',
@@ -302,20 +342,20 @@ export function buildMcpServer(authInfo) {
         appointmentId: z.string().min(1)
       })
     },
-    wrap(completeAppointmentTool(authInfo))
+    completeAppointmentTool(authInfo)
   );
 
-  server.registerTool(
+  registerAllowed(
     'get_my_profile',
     {
       description: 'Return the connected user profile. Requires profile:read.',
       inputSchema: z.object({}),
       annotations: { readOnlyHint: true }
     },
-    wrap(getMyProfileTool(authInfo))
+    getMyProfileTool(authInfo)
   );
 
-  server.registerTool(
+  registerAllowed(
     'update_my_profile',
     {
       description: 'Update the connected user profile. Requires profile:update.',
@@ -328,10 +368,10 @@ export function buildMcpServer(authInfo) {
         specialization: z.string().optional()
       })
     },
-    wrap(updateMyProfileTool(authInfo))
+    updateMyProfileTool(authInfo)
   );
 
-  server.registerTool(
+  registerAllowed(
     'update_availability',
     {
       description: 'Update weekly availability. Doctors may only update themselves. Requires availability:update.',
@@ -340,10 +380,10 @@ export function buildMcpServer(authInfo) {
         weeklyAvailability: weeklyAvailabilitySchema
       })
     },
-    wrap(updateAvailabilityTool(authInfo))
+    updateAvailabilityTool(authInfo)
   );
 
-  server.registerTool(
+  registerAllowed(
     'check_doctor_availability',
     {
       description: 'Check whether a doctor can be booked on a specific date. Requires availability:read.',
@@ -353,10 +393,10 @@ export function buildMcpServer(authInfo) {
       }),
       annotations: { readOnlyHint: true }
     },
-    wrap(checkDoctorAvailabilityTool(authInfo))
+    checkDoctorAvailabilityTool(authInfo)
   );
 
-  server.registerTool(
+  registerAllowed(
     'get_appointment',
     {
       description: 'Get one appointment if the caller is allowed to see it. Requires appointment:read.',
@@ -365,10 +405,10 @@ export function buildMcpServer(authInfo) {
       }),
       annotations: { readOnlyHint: true }
     },
-    wrap(getAppointmentTool(authInfo))
+    getAppointmentTool(authInfo)
   );
 
-  server.registerTool(
+  registerAllowed(
     'list_my_appointments',
     {
       description: 'List appointments for the connected patient or doctor. Requires appointment:read.',
@@ -378,10 +418,10 @@ export function buildMcpServer(authInfo) {
       }),
       annotations: { readOnlyHint: true }
     },
-    wrap(listMyAppointmentsTool(authInfo))
+    listMyAppointmentsTool(authInfo)
   );
 
-  server.registerTool(
+  registerAllowed(
     'list_doctor_appointment_requests',
     {
       description: 'List pending appointment requests for the connected doctor. Requires appointment:read.',
@@ -391,10 +431,10 @@ export function buildMcpServer(authInfo) {
       }),
       annotations: { readOnlyHint: true }
     },
-    wrap(listDoctorAppointmentRequestsTool(authInfo))
+    listDoctorAppointmentRequestsTool(authInfo)
   );
 
-  server.registerTool(
+  registerAllowed(
     'admin_update_appointment',
     {
       description: 'Administrator updates any appointment status, date, or note. Requires appointment:update and admin role.',
@@ -405,17 +445,49 @@ export function buildMcpServer(authInfo) {
         responseNote: z.string().optional()
       })
     },
-    wrap(adminUpdateAppointmentTool(authInfo))
+    adminUpdateAppointmentTool(authInfo)
   );
 
-  server.registerTool(
+  registerAllowed(
     'admin_get_dashboard_stats',
     {
       description: 'Administrator dashboard counts for doctors, patients, and appointments. Requires appointment:read and admin role.',
       inputSchema: z.object({}),
       annotations: { readOnlyHint: true }
     },
-    wrap(adminGetDashboardStatsTool(authInfo))
+    adminGetDashboardStatsTool(authInfo)
+  );
+
+  registerAllowed(
+    'search_logs',
+    {
+      description:
+        'Search persisted server logs for debugging OAuth, MCP, API, and database issues. Requires logs:read. Admins can search all logs; other users only see their own activity.',
+      inputSchema: z.object({
+        requestId: z.string().optional().describe('Filter by correlation/request ID'),
+        operation: z.string().optional().describe('Filter by operation name, e.g. mcp.tool.failed'),
+        level: z.enum(['debug', 'info', 'warn', 'error']).optional(),
+        tool: z.string().optional().describe('Filter by MCP tool name'),
+        userId: z.string().optional().describe('Admin only: filter by user ID'),
+        sinceMinutes: z.number().int().min(1).max(10080).optional().describe('Only logs from the last N minutes'),
+        limit: z.number().int().min(1).max(200).optional().describe('Maximum number of log entries to return')
+      }),
+      annotations: { readOnlyHint: true }
+    },
+    searchLogsTool(authInfo)
+  );
+
+  registerAllowed(
+    'get_request_logs',
+    {
+      description:
+        'Return all persisted logs for one requestId in chronological order. Requires logs:read. Use this to trace a single request end-to-end.',
+      inputSchema: z.object({
+        requestId: z.string().min(1).describe('The x-request-id / correlation ID to trace')
+      }),
+      annotations: { readOnlyHint: true }
+    },
+    getRequestLogsTool(authInfo)
   );
 
   return server;
