@@ -1,4 +1,5 @@
 import { logError } from '../lib/request-context.js';
+import { logAuditFailure } from '../lib/audit-log.js';
 import { config } from '../config/env.js';
 
 export class AppError extends Error {
@@ -23,15 +24,37 @@ export function errorMiddleware(err, req, res, next) {
     message = 'Invalid id.';
   }
 
-  logError(err, {
-    operation: 'http.error',
-    method: req.method,
-    route: req.path,
-    statusCode: status,
-    errorCode: code,
-    userId: req.user?._id ? String(req.user._id) : req.auth?.extra?.userId,
-    clientId: req.auth?.clientId
-  });
+  const actor =
+    req.user ||
+    (req.auth?.extra?.userId
+      ? {
+          _id: req.auth.extra.userId,
+          name: req.auth.extra.actorName,
+          role: req.auth.extra.role
+        }
+      : null);
+
+  if (req.auditAction && actor) {
+    logAuditFailure(actor, req.auditAction, err, {
+      method: req.method,
+      route: req.path,
+      statusCode: status,
+      errorCode: code,
+      clientId: req.auth?.clientId
+    });
+  } else {
+    logError(err, {
+      operation: 'http.error',
+      method: req.method,
+      route: req.path,
+      statusCode: status,
+      errorCode: code,
+      userId: req.user?._id ? String(req.user._id) : req.auth?.extra?.userId,
+      actorName: req.user?.name || req.auth?.extra?.actorName,
+      role: req.user?.role || req.auth?.extra?.role,
+      clientId: req.auth?.clientId
+    });
+  }
 
   const body = {
     error: code,

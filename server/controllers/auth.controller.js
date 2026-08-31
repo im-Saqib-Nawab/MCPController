@@ -8,7 +8,8 @@ import {
   updateOwnProfile
 } from '../services/auth.service.js';
 import { AppError } from '../middleware/error.middleware.js';
-import { logError, logOperation } from '../lib/request-context.js';
+import { logError } from '../lib/request-context.js';
+import { logAudit } from '../lib/audit-log.js';
 
 const credentialsSchema = z.object({
   email: z.string().email(),
@@ -45,15 +46,13 @@ function parseOrThrow(schema, data) {
 }
 
 export async function register(req, res, next) {
+  req.auditAction = 'Register';
   try {
     const parsed = parseOrThrow(registerSchema, req.body);
     const user = await registerUser(parsed);
     setSessionCookie(res, user);
 
-    logOperation('info', 'auth.register.completed', {
-      userId: String(user.id || user._id),
-      role: user.role
-    });
+    logAudit(user, 'Register', { status: 'success', metadata: { email: user.email } });
 
     res.status(201).json({ user });
   } catch (err) {
@@ -63,15 +62,13 @@ export async function register(req, res, next) {
 }
 
 export async function login(req, res, next) {
+  req.auditAction = 'Login';
   try {
     const parsed = parseOrThrow(credentialsSchema, req.body);
     const user = await loginUser(parsed);
     setSessionCookie(res, user);
 
-    logOperation('info', 'auth.login.completed', {
-      userId: String(user.id || user._id),
-      role: user.role
-    });
+    logAudit(user, 'Login', { status: 'success', metadata: { email: user.email } });
 
     res.json({ user });
   } catch (err) {
@@ -81,9 +78,7 @@ export async function login(req, res, next) {
 }
 
 export function logout(req, res) {
-  logOperation('info', 'auth.logout.completed', {
-    userId: req.user?._id ? String(req.user._id) : undefined
-  });
+  logAudit(req.user, 'Logout', { status: 'success' });
 
   clearSessionCookie(res);
   res.json({ ok: true });
@@ -98,9 +93,11 @@ export async function me(req, res, next) {
 }
 
 export async function updateMe(req, res, next) {
+  req.auditAction = 'Update Profile';
   try {
     const parsed = parseOrThrow(profileSchema, req.body || {});
     const user = await updateOwnProfile(req.user._id, parsed);
+    logAudit(req.user, req.auditAction, { status: 'success' });
     res.json({ user });
   } catch (err) {
     next(err);

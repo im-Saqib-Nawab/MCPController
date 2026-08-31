@@ -12,6 +12,7 @@ router.get('/scopes', adminController.listScopeOptions);
 router.get('/stats', adminController.stats);
 
 router.get('/observability/overview', observabilityController.overview);
+router.get('/observability/filters', observabilityController.filters);
 router.get('/observability/metrics', observabilityController.metrics);
 router.get('/observability/logs', observabilityController.logs);
 router.get('/observability/logs/:logId', observabilityController.logDetail);

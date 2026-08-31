@@ -1,9 +1,34 @@
 import mongoose from 'mongoose';
 
 import { config } from '../config/env.js';
+import { MCP_ACTION_LABELS } from '../lib/audit-log.js';
 import { getLogById, searchLogs } from './log-store.service.js';
 
 const APP_STARTED_AT = Date.now();
+
+const REST_AUDIT_ACTIONS = [
+  'Login',
+  'Logout',
+  'Register',
+  'Update Profile',
+  'Book Appointment',
+  'Cancel Appointment',
+  'Accept Appointment',
+  'Reject Appointment',
+  'Suggest Alternative Date',
+  'Accept Alternative Date',
+  'Complete Appointment',
+  'Admin Update Appointment',
+  'Create Doctor',
+  'Update Doctor',
+  'Delete Doctor',
+  'Update Availability',
+  'Create Patient',
+  'Update Patient',
+  'Delete Patient',
+  'Update User Permissions',
+  'Revoke MCP Connection'
+];
 
 let SystemLogModel;
 
@@ -39,6 +64,58 @@ function actorFromUser(user) {
   };
 }
 
+function traceMatch(filters = {}) {
+  const since = sinceDate(filters);
+  const match = {
+    requestId: { $exists: true, $nin: [null, ''] },
+    createdAt: { $gte: since }
+  };
+
+  if (filters.includeTechnical !== true) {
+    match.category = 'audit';
+  }
+
+  if (filters.userId) {
+    match.userId = String(filters.userId);
+  }
+
+  if (filters.role) {
+    match.role = String(filters.role);
+  }
+
+  if (filters.action) {
+    match.action = String(filters.action);
+  }
+
+  if (filters.status) {
+    match.status = String(filters.status);
+  }
+
+  if (filters.actorName) {
+    match.actorName = { $regex: String(filters.actorName).trim(), $options: 'i' };
+  }
+
+  if (filters.minDurationMs) {
+    match.durationMs = { $gte: Number(filters.minDurationMs) };
+  }
+
+  if (filters.search) {
+    const term = String(filters.search).trim();
+    if (term) {
+      match.$or = [
+        { requestId: term },
+        { action: { $regex: term, $options: 'i' } },
+        { actorName: { $regex: term, $options: 'i' } },
+        { message: { $regex: term, $options: 'i' } },
+        { tool: { $regex: term, $options: 'i' } },
+        { route: { $regex: term, $options: 'i' } }
+      ];
+    }
+  }
+
+  return match;
+}
+
 export async function listLogs(user, filters = {}) {
   return searchLogs(actorFromUser(user), filters);
 }
@@ -49,29 +126,8 @@ export async function fetchLog(user, logId) {
 
 export async function listTraces(user, filters = {}) {
   const SystemLog = await getModel();
-  const since = sinceDate(filters);
+  const match = traceMatch(filters);
   const limit = Math.min(Math.max(Number(filters.limit) || 50, 1), 200);
-
-  const match = {
-    requestId: { $exists: true, $nin: [null, ''] },
-    createdAt: { $gte: since }
-  };
-
-  if (filters.status === 'error') {
-    match.level = 'error';
-  }
-
-  if (filters.search) {
-    const term = String(filters.search).trim();
-    if (term) {
-      match.$or = [
-        { requestId: term },
-        { route: { $regex: term, $options: 'i' } },
-        { operation: { $regex: term, $options: 'i' } },
-        { tool: { $regex: term, $options: 'i' } }
-      ];
-    }
-  }
 
   const traces = await SystemLog.aggregate([
     { $match: match },
@@ -85,17 +141,21 @@ export async function listTraces(user, filters = {}) {
         method: { $first: '$method' },
         route: { $first: '$route' },
         userId: { $first: '$userId' },
+        actorName: { $first: '$actorName' },
         role: { $first: '$role' },
+        action: { $first: '$action' },
         tool: { $first: '$tool' },
         statusCode: { $max: '$statusCode' },
+        status: { $last: '$status' },
+        message: { $last: '$message' },
         hasError: {
           $max: {
-            $cond: [{ $in: ['$level', ['error', 'warn']] }, 1, 0]
+            $cond: [{ $eq: ['$status', 'error'] }, 1, 0]
           }
         },
         errorMessage: {
           $last: {
-            $cond: [{ $eq: ['$level', 'error'] }, '$errorMessage', null]
+            $cond: [{ $eq: ['$status', 'error'] }, '$errorMessage', null]
           }
         },
         stepCount: { $sum: 1 },
@@ -103,9 +163,13 @@ export async function listTraces(user, filters = {}) {
           $push: {
             time: '$createdAt',
             operation: '$operation',
+            action: '$action',
             level: '$level',
             message: '$message',
+            actorName: '$actorName',
+            role: '$role',
             tool: '$tool',
+            status: '$status',
             durationMs: '$durationMs'
           }
         }
@@ -116,23 +180,28 @@ export async function listTraces(user, filters = {}) {
         status: {
           $cond: [
             {
-              $or: [{ $eq: ['$hasError', 1] }, { $gte: ['$statusCode', 400] }]
+              $or: [{ $eq: ['$hasError', 1] }, { $eq: ['$status', 'error'] }, { $gte: ['$statusCode', 400] }]
             },
             'error',
             'success'
           ]
         },
         action: {
-          $cond: [
-            { $ifNull: ['$tool', false] },
-            { $concat: ['MCP ', '$tool'] },
-            { $concat: [{ $ifNull: ['$method', ''] }, ' ', { $ifNull: ['$route', ''] }] }
+          $ifNull: [
+            '$action',
+            {
+              $cond: [
+                { $ifNull: ['$tool', false] },
+                { $concat: ['MCP ', '$tool'] },
+                { $concat: [{ $ifNull: ['$method', ''] }, ' ', { $ifNull: ['$route', ''] }] }
+              ]
+            }
           ]
         }
       }
     },
-    ...(filters.status === 'success' ? [{ $match: { status: 'success' } }] : []),
-    ...(filters.status === 'error' ? [{ $match: { status: 'error' } }] : []),
+    ...(filters.status ? [{ $match: { status: String(filters.status) } }] : []),
+    ...(filters.minDurationMs ? [{ $match: { durationMs: { $gte: Number(filters.minDurationMs) } } }] : []),
     { $sort: { startTime: -1 } },
     { $limit: limit }
   ]);
@@ -141,7 +210,8 @@ export async function listTraces(user, filters = {}) {
     traceId: trace._id,
     timestamp: trace.startTime,
     endTime: trace.endTime,
-    action: String(trace.action || '').trim(),
+    action: trace.action || 'Unknown action',
+    actorName: trace.actorName,
     userId: trace.userId,
     role: trace.role,
     tool: trace.tool,
@@ -150,6 +220,7 @@ export async function listTraces(user, filters = {}) {
     durationMs: trace.durationMs || null,
     status: trace.status,
     statusCode: trace.statusCode || null,
+    message: trace.message,
     errorMessage: trace.errorMessage || null,
     stepCount: trace.stepCount,
     steps: trace.operations
@@ -159,40 +230,49 @@ export async function listTraces(user, filters = {}) {
 export async function getTrace(user, requestId) {
   const logs = await searchLogs(actorFromUser(user), {
     requestId,
-    limit: 200
+    limit: 200,
+    includeTechnical: true,
+    auditOnly: false
   });
 
   if (!logs.length) {
     return null;
   }
 
-  const hasError = logs.some((log) => log.level === 'error' || (log.statusCode && log.statusCode >= 400));
+  const auditLog = logs.find((log) => log.category === 'audit') || logs[logs.length - 1];
+  const hasError = logs.some((log) => log.status === 'error' || log.level === 'error' || (log.statusCode && log.statusCode >= 400));
   const durationMs = logs.reduce((max, log) => Math.max(max, log.durationMs || 0), 0);
-  const first = logs[0];
-  const last = logs[logs.length - 1];
 
   return {
     traceId: requestId,
-    timestamp: first.time,
-    endTime: last.time,
-    action: first.tool ? `MCP ${first.tool}` : `${first.method || ''} ${first.route || ''}`.trim(),
-    userId: first.userId,
-    role: first.role,
-    tool: first.tool,
-    method: first.method,
-    route: first.route,
+    timestamp: logs[0].time,
+    endTime: logs[logs.length - 1].time,
+    action: auditLog.action || auditLog.summary,
+    actorName: auditLog.actorName,
+    userId: auditLog.userId,
+    role: auditLog.role,
+    tool: auditLog.tool,
+    method: auditLog.method,
+    route: auditLog.route,
     durationMs: durationMs || null,
-    status: hasError ? 'error' : 'success',
+    status: hasError ? 'error' : auditLog.status || 'success',
+    message: auditLog.message,
     errorMessage: logs.find((log) => log.errorMessage)?.errorMessage || null,
     steps: logs.map((log) => ({
+      id: log.id,
       time: log.time,
       level: log.level,
       operation: log.operation,
+      action: log.action,
       message: log.message,
+      actorName: log.actorName,
+      role: log.role,
       tool: log.tool,
+      status: log.status,
       durationMs: log.durationMs,
       statusCode: log.statusCode,
-      errorMessage: log.errorMessage
+      errorMessage: log.errorMessage,
+      requestId: log.requestId
     }))
   };
 }
@@ -201,14 +281,34 @@ export async function getMetrics(_user, filters = {}) {
   const SystemLog = await getModel();
   const since = sinceDate(filters);
 
+  const auditMatch = { category: 'audit', createdAt: { $gte: since } };
+
   const [
+    auditTotal,
+    auditSuccess,
+    auditFailed,
+    auditByAction,
+    auditByRole,
     httpCompleted,
     httpErrors,
     mcpTools,
     dbOps,
-    levelCounts,
-    recentErrors
+    recentAuditErrors
   ] = await Promise.all([
+    SystemLog.countDocuments(auditMatch),
+    SystemLog.countDocuments({ ...auditMatch, status: 'success' }),
+    SystemLog.countDocuments({ ...auditMatch, status: 'error' }),
+    SystemLog.aggregate([
+      { $match: auditMatch },
+      { $group: { _id: '$action', count: { $sum: 1 }, failures: { $sum: { $cond: [{ $eq: ['$status', 'error'] }, 1, 0] } } } },
+      { $sort: { count: -1 } },
+      { $limit: 10 }
+    ]),
+    SystemLog.aggregate([
+      { $match: auditMatch },
+      { $group: { _id: '$role', count: { $sum: 1 } } },
+      { $sort: { count: -1 } }
+    ]),
     SystemLog.countDocuments({
       operation: 'http.request.completed',
       createdAt: { $gte: since }
@@ -221,7 +321,8 @@ export async function getMetrics(_user, filters = {}) {
     SystemLog.aggregate([
       {
         $match: {
-          operation: { $in: ['mcp.tool.completed', 'mcp.tool.failed', 'mcp.tool.started'] },
+          category: 'audit',
+          tool: { $exists: true, $nin: [null, ''] },
           createdAt: { $gte: since }
         }
       },
@@ -229,11 +330,7 @@ export async function getMetrics(_user, filters = {}) {
         $group: {
           _id: '$tool',
           calls: { $sum: 1 },
-          failures: {
-            $sum: {
-              $cond: [{ $eq: ['$operation', 'mcp.tool.failed'] }, 1, 0]
-            }
-          },
+          failures: { $sum: { $cond: [{ $eq: ['$status', 'error'] }, 1, 0] } },
           avgDurationMs: { $avg: '$durationMs' }
         }
       },
@@ -244,14 +341,7 @@ export async function getMetrics(_user, filters = {}) {
       operation: { $regex: /^db\./ },
       createdAt: { $gte: since }
     }),
-    SystemLog.aggregate([
-      { $match: { createdAt: { $gte: since } } },
-      { $group: { _id: '$level', count: { $sum: 1 } } }
-    ]),
-    SystemLog.find({
-      level: 'error',
-      createdAt: { $gte: since }
-    })
+    SystemLog.find({ ...auditMatch, status: 'error' })
       .sort({ createdAt: -1 })
       .limit(5)
       .lean()
@@ -265,40 +355,59 @@ export async function getMetrics(_user, filters = {}) {
         durationMs: { $type: 'number' }
       }
     },
-    {
-      $group: {
-        _id: null,
-        avgDurationMs: { $avg: '$durationMs' }
-      }
-    }
+    { $group: { _id: null, avgDurationMs: { $avg: '$durationMs' } } }
   ]);
 
-  const mcpToolCalls = await SystemLog.countDocuments({
-    operation: 'mcp.tool.started',
-    createdAt: { $gte: since }
-  });
+  const auditAvgDuration = await SystemLog.aggregate([
+    {
+      $match: {
+        ...auditMatch,
+        durationMs: { $type: 'number' }
+      }
+    },
+    { $group: { _id: null, avgDurationMs: { $avg: '$durationMs' } } }
+  ]);
 
-  const successfulRequests = httpCompleted - httpErrors;
-  const errorRate = httpCompleted ? Number(((httpErrors / httpCompleted) * 100).toFixed(1)) : 0;
   const uptimeMs = Date.now() - APP_STARTED_AT;
   const dbConnected = mongoose.connection.readyState === 1;
+  const errorRate = auditTotal ? Number(((auditFailed / auditTotal) * 100).toFixed(1)) : 0;
 
   return {
-    window: {
-      since,
-      until: new Date()
+    window: { since, until: new Date() },
+    audit: {
+      total: auditTotal,
+      successful: auditSuccess,
+      failed: auditFailed,
+      errorRate,
+      averageDurationMs: Math.round(auditAvgDuration[0]?.avgDurationMs || 0),
+      byAction: auditByAction.map((row) => ({
+        action: row._id || 'Unknown',
+        count: row.count,
+        failures: row.failures
+      })),
+      byRole: auditByRole.map((row) => ({
+        role: row._id || 'unknown',
+        count: row.count
+      })),
+      recentErrors: recentAuditErrors.map((log) => ({
+        id: String(log._id),
+        time: log.createdAt,
+        action: log.action,
+        message: log.message,
+        actorName: log.actorName,
+        role: log.role,
+        requestId: log.requestId
+      }))
     },
-    requests: {
+    http: {
       total: httpCompleted,
-      successful: successfulRequests,
       failed: httpErrors,
-      errorRate
-    },
-    responseTime: {
-      averageMs: Math.round(avgDuration[0]?.avgDurationMs || 0)
+      successful: httpCompleted - httpErrors,
+      errorRate: httpCompleted ? Number(((httpErrors / httpCompleted) * 100).toFixed(1)) : 0,
+      averageResponseMs: Math.round(avgDuration[0]?.avgDurationMs || 0)
     },
     mcp: {
-      toolCalls: mcpToolCalls,
+      toolCalls: mcpTools.reduce((sum, row) => sum + row.calls, 0),
       topTools: mcpTools.map((row) => ({
         tool: row._id || 'unknown',
         calls: row.calls,
@@ -311,22 +420,12 @@ export async function getMetrics(_user, filters = {}) {
       connected: dbConnected,
       state: dbConnected ? 'connected' : 'disconnected'
     },
-    logs: {
-      byLevel: Object.fromEntries(levelCounts.map((row) => [row._id, row.count]))
-    },
     health: {
       ok: dbConnected,
       uptimeMs,
       uptimeHuman: formatDuration(uptimeMs),
       environment: config.nodeEnv
-    },
-    recentErrors: recentErrors.map((log) => ({
-      id: String(log._id),
-      time: log.createdAt,
-      operation: log.operation,
-      message: log.errorMessage || log.message,
-      requestId: log.requestId
-    }))
+    }
   };
 }
 
@@ -338,6 +437,15 @@ export async function getOverview(user, filters = {}) {
   ]);
 
   return { metrics, logs, traces };
+}
+
+export async function getFilterOptions() {
+  const actions = [...new Set([...REST_AUDIT_ACTIONS, ...Object.values(MCP_ACTION_LABELS)])].sort();
+  return {
+    actions,
+    roles: ['admin', 'doctor', 'patient'],
+    statuses: ['success', 'error']
+  };
 }
 
 function formatDuration(ms) {

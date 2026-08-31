@@ -3,6 +3,7 @@ import * as patientService from '../services/patient.service.js';
 import { AppError } from '../middleware/error.middleware.js';
 import { hasScope } from '../services/permission.service.js';
 import { getEffectiveAllowedScopes } from '../services/auth.service.js';
+import { logAudit } from '../lib/audit-log.js';
 
 function parseOrThrow(schema, data) {
   const result = schema.safeParse(data);
@@ -57,10 +58,15 @@ export async function getPatient(req, res, next) {
 }
 
 export async function createPatient(req, res, next) {
+  req.auditAction = 'Create Patient';
   try {
     requireUserScope(req.user, 'patient:create');
     const parsed = parseOrThrow(createSchema, req.body || {});
     const patient = await patientService.addPatient(parsed, req.user);
+    logAudit(req.user, req.auditAction, {
+      status: 'success',
+      metadata: { patientId: String(patient.id || patient._id), email: parsed.email }
+    });
     res.status(201).json({ patient });
   } catch (err) {
     next(err);
@@ -68,10 +74,15 @@ export async function createPatient(req, res, next) {
 }
 
 export async function updatePatient(req, res, next) {
+  req.auditAction = 'Update Patient';
   try {
     requireUserScope(req.user, 'patient:update');
     const parsed = parseOrThrow(updateSchema, req.body || {});
     const patient = await patientService.updatePatient(req.params.patientId, parsed, req.user);
+    logAudit(req.user, req.auditAction, {
+      status: 'success',
+      metadata: { patientId: req.params.patientId }
+    });
     res.json({ patient });
   } catch (err) {
     next(err);
@@ -79,9 +90,14 @@ export async function updatePatient(req, res, next) {
 }
 
 export async function removePatient(req, res, next) {
+  req.auditAction = 'Delete Patient';
   try {
     requireUserScope(req.user, 'patient:delete');
     const result = await patientService.deletePatient(req.params.patientId, req.user);
+    logAudit(req.user, req.auditAction, {
+      status: 'success',
+      metadata: { patientId: req.params.patientId }
+    });
     res.json(result);
   } catch (err) {
     next(err);

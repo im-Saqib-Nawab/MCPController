@@ -8,9 +8,11 @@ function actorFromRequest(req) {
   const userId = req.user?._id ? String(req.user._id) : req.auth?.extra?.userId;
   const clientId = req.auth?.clientId;
   const role = req.user?.role || req.auth?.extra?.role;
+  const actorName = req.user?.name || req.auth?.extra?.actorName;
 
   return {
     ...(userId ? { userId } : {}),
+    ...(actorName ? { actorName } : {}),
     ...(clientId ? { clientId } : {}),
     ...(role ? { role } : {})
   };

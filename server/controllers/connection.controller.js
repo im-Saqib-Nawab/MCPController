@@ -1,7 +1,7 @@
 import { Connection } from '../models/Connection.js';
 import { AccessToken } from '../models/AccessToken.js';
 import { User } from '../models/User.js';
-import { logOperation } from '../lib/request-context.js';
+import { logAudit } from '../lib/audit-log.js';
 
 export async function listConnections(req, res, next) {
   try {
@@ -18,14 +18,15 @@ export async function listConnections(req, res, next) {
 }
 
 export async function revokeConnection(req, res, next) {
+  req.auditAction = 'Revoke MCP Connection';
   try {
     const { clientId } = req.params;
     await Connection.deleteOne({ userId: req.user._id, clientId });
     await AccessToken.updateMany({ userId: req.user._id, clientId }, { revoked: true });
 
-    logOperation('info', 'oauth.connection.revoked', {
-      userId: String(req.user._id),
-      clientId
+    logAudit(req.user, req.auditAction, {
+      status: 'success',
+      metadata: { clientId }
     });
 
     res.json({ ok: true });

@@ -61,6 +61,7 @@ export async function requireMcpBearer(req, res, next) {
       extra: {
         userId: String(record.userId),
         role: user.role,
+        actorName: user.name,
         effectiveScopes: allowed
       }
     };
@@ -69,6 +70,7 @@ export async function requireMcpBearer(req, res, next) {
       userId: String(record.userId),
       clientId: record.clientId,
       role: user.role,
+      actorName: user.name,
       scopeCount: liveScopes.length
     });
 

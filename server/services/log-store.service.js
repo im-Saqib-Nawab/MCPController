@@ -63,6 +63,10 @@ export async function persistLogEntry({ level, operation, message, fields = {} }
     statusCode: fields.statusCode,
     durationMs: fields.durationMs,
     userId: fields.userId,
+    actorName: fields.actorName,
+    action: fields.action,
+    status: fields.status,
+    category: fields.category,
     clientId: fields.clientId,
     role: fields.role,
     tool: fields.tool,
@@ -101,23 +105,35 @@ function formatLog(log) {
     operation: log.operation,
     message: log.message,
     requestId: log.requestId,
+    traceId: log.requestId,
     method: log.method,
     route: log.route,
     statusCode: log.statusCode,
     durationMs: log.durationMs,
     userId: log.userId,
+    actorName: log.actorName,
+    action: log.action,
+    status: log.status,
+    category: log.category,
     clientId: log.clientId,
     role: log.role,
     tool: log.tool,
     errorCode: log.errorCode,
     errorMessage: log.errorMessage,
     errorStack: log.errorStack,
-    metadata: log.metadata
+    metadata: log.metadata,
+    summary: log.message || log.action || log.operation
   };
 }
 
 function buildLogQuery(filters = {}) {
   const query = {};
+
+  if (filters.category) {
+    query.category = String(filters.category);
+  } else if (filters.auditOnly !== false && filters.includeTechnical !== true) {
+    query.category = 'audit';
+  }
 
   if (filters.requestId) {
     query.requestId = String(filters.requestId);
@@ -127,8 +143,20 @@ function buildLogQuery(filters = {}) {
     query.operation = String(filters.operation);
   }
 
+  if (filters.action) {
+    query.action = String(filters.action);
+  }
+
   if (filters.level) {
     query.level = String(filters.level);
+  }
+
+  if (filters.status) {
+    query.status = String(filters.status);
+  }
+
+  if (filters.role) {
+    query.role = String(filters.role);
   }
 
   if (filters.tool) {
@@ -139,13 +167,20 @@ function buildLogQuery(filters = {}) {
     query.userId = String(filters.userId);
   }
 
+  if (filters.actorName) {
+    query.actorName = { $regex: String(filters.actorName).trim(), $options: 'i' };
+  }
+
   if (filters.search) {
     const term = String(filters.search).trim();
     if (term) {
       query.$or = [
         { message: { $regex: term, $options: 'i' } },
+        { action: { $regex: term, $options: 'i' } },
+        { actorName: { $regex: term, $options: 'i' } },
         { operation: { $regex: term, $options: 'i' } },
         { route: { $regex: term, $options: 'i' } },
+        { requestId: term },
         { errorMessage: { $regex: term, $options: 'i' } }
       ];
     }

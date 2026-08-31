@@ -38,13 +38,13 @@ export function logOperation(level, operation, fields = {}) {
       route: ctx?.path,
       ...fields
     },
-    operation
+    fields.message || operation
   );
 
   void persistLogEntry({
     level,
     operation,
-    message: operation,
+    message: fields.message || operation,
     fields: {
       method: ctx?.method,
       route: ctx?.path,
@@ -69,10 +69,11 @@ export function logError(err, fields = {}) {
   void persistLogEntry({
     level: 'error',
     operation: fields.operation || 'error',
-    message: err?.message || 'Error',
+    message: fields.message || err?.message || 'Error',
     fields: {
       method: ctx?.method,
       route: ctx?.path,
+      status: fields.status || 'error',
       ...fields,
       err: serializeError(err)
     }

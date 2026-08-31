@@ -9,11 +9,17 @@ function parseFilters(query = {}) {
     limit: query.limit ? Number(query.limit) : undefined,
     level: query.level,
     operation: query.operation,
+    action: query.action,
     tool: query.tool,
     userId: query.userId,
+    actorName: query.actorName,
+    role: query.role,
+    status: query.status,
     requestId: query.requestId,
     search: query.search,
-    status: query.status
+    minDurationMs: query.minDurationMs ? Number(query.minDurationMs) : undefined,
+    includeTechnical: query.includeTechnical === 'true',
+    auditOnly: query.auditOnly !== 'false'
   };
 }
 
@@ -64,6 +70,14 @@ export async function traceDetail(req, res, next) {
       throw new AppError(404, 'not_found', 'Trace not found.');
     }
     res.json({ trace });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function filters(req, res, next) {
+  try {
+    res.json({ filters: await observabilityService.getFilterOptions() });
   } catch (err) {
     next(err);
   }

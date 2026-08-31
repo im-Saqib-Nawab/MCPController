@@ -2,6 +2,7 @@ import { McpServer } from '@modelcontextprotocol/server';
 import * as z from 'zod/v4';
 import { config } from '../config/env.js';
 import { logError, logOperation } from '../lib/request-context.js';
+import { logAudit, mcpActionLabel } from '../lib/audit-log.js';
 import { listDoctorsTool } from './tools/listDoctors.tool.js';
 import { getDoctorTool } from './tools/getDoctor.tool.js';
 import { addDoctorTool } from './tools/addDoctor.tool.js';
@@ -58,9 +59,11 @@ function wrap(toolName, handler, authInfo) {
     const start = Date.now();
     const actor = {
       userId: authInfo?.extra?.userId,
-      clientId: authInfo?.clientId,
-      role: authInfo?.extra?.role
+      name: authInfo?.extra?.actorName,
+      role: authInfo?.extra?.role,
+      clientId: authInfo?.clientId
     };
+    const action = mcpActionLabel(toolName);
 
     logOperation('info', 'mcp.tool.started', { tool: toolName, ...actor });
 
@@ -76,6 +79,20 @@ function wrap(toolName, handler, authInfo) {
         ...actor
       });
 
+      logAudit(
+        {
+          _id: actor.userId,
+          id: actor.userId,
+          name: actor.name,
+          role: actor.role
+        },
+        action, {
+        status: failed ? 'error' : 'success',
+        level: failed ? 'warn' : 'info',
+        tool: toolName,
+        durationMs
+      });
+
       return result;
     } catch (err) {
       logError(err, {
@@ -83,6 +100,19 @@ function wrap(toolName, handler, authInfo) {
         tool: toolName,
         durationMs: Date.now() - start,
         ...actor
+      });
+      logAudit(
+        {
+          _id: actor.userId,
+          id: actor.userId,
+          name: actor.name,
+          role: actor.role
+        },
+        action, {
+        status: 'error',
+        level: 'warn',
+        tool: toolName,
+        durationMs: Date.now() - start
       });
       return errorResult(err);
     }

@@ -29,6 +29,23 @@ const systemLogSchema = new mongoose.Schema(
       type: String,
       index: true
     },
+    actorName: {
+      type: String,
+      index: true
+    },
+    action: {
+      type: String,
+      index: true
+    },
+    status: {
+      type: String,
+      enum: ['success', 'error'],
+      index: true
+    },
+    category: {
+      type: String,
+      index: true
+    },
     clientId: String,
     role: String,
     tool: String,

@@ -3,6 +3,7 @@ import * as appointmentService from '../services/appointment.service.js';
 import { AppError } from '../middleware/error.middleware.js';
 import { hasScope } from '../services/permission.service.js';
 import { getEffectiveAllowedScopes } from '../services/auth.service.js';
+import { logAudit } from '../lib/audit-log.js';
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD');
 
@@ -46,6 +47,7 @@ export async function getAppointment(req, res, next) {
 }
 
 export async function createAppointment(req, res, next) {
+  req.auditAction = 'Book Appointment';
   try {
     requireUserScope(req.user, 'appointment:create');
     const parsed = parseOrThrow(
@@ -53,6 +55,14 @@ export async function createAppointment(req, res, next) {
       req.body || {}
     );
     const appointment = await appointmentService.requestAppointment(req.user, parsed);
+    logAudit(req.user, req.auditAction, {
+      status: 'success',
+      metadata: {
+        appointmentId: String(appointment._id || appointment.id),
+        doctorId: parsed.doctorId,
+        date: parsed.date
+      }
+    });
     res.status(201).json({ appointment });
   } catch (err) {
     next(err);
@@ -60,9 +70,14 @@ export async function createAppointment(req, res, next) {
 }
 
 export async function acceptAppointment(req, res, next) {
+  req.auditAction = 'Accept Appointment';
   try {
     requireUserScope(req.user, 'appointment:update');
     const appointment = await appointmentService.acceptAppointment(req.params.appointmentId, req.user);
+    logAudit(req.user, req.auditAction, {
+      status: 'success',
+      metadata: { appointmentId: req.params.appointmentId }
+    });
     res.json({ appointment });
   } catch (err) {
     next(err);
@@ -70,6 +85,7 @@ export async function acceptAppointment(req, res, next) {
 }
 
 export async function rejectAppointment(req, res, next) {
+  req.auditAction = 'Reject Appointment';
   try {
     requireUserScope(req.user, 'appointment:update');
     const parsed = parseOrThrow(
@@ -84,6 +100,10 @@ export async function rejectAppointment(req, res, next) {
       req.user,
       parsed
     );
+    logAudit(req.user, req.auditAction, {
+      status: 'success',
+      metadata: { appointmentId: req.params.appointmentId }
+    });
     res.json({ appointment });
   } catch (err) {
     next(err);
@@ -91,6 +111,7 @@ export async function rejectAppointment(req, res, next) {
 }
 
 export async function suggestAlternative(req, res, next) {
+  req.auditAction = 'Suggest Alternative Date';
   try {
     requireUserScope(req.user, 'appointment:update');
     const parsed = parseOrThrow(
@@ -105,6 +126,10 @@ export async function suggestAlternative(req, res, next) {
       req.user,
       parsed
     );
+    logAudit(req.user, req.auditAction, {
+      status: 'success',
+      metadata: { appointmentId: req.params.appointmentId, dates: parsed.dates }
+    });
     res.json({ appointment });
   } catch (err) {
     next(err);
@@ -112,6 +137,7 @@ export async function suggestAlternative(req, res, next) {
 }
 
 export async function acceptAlternative(req, res, next) {
+  req.auditAction = 'Accept Alternative Date';
   try {
     requireUserScope(req.user, 'appointment:update');
     const parsed = parseOrThrow(z.object({ date: dateSchema }), req.body || {});
@@ -120,6 +146,10 @@ export async function acceptAlternative(req, res, next) {
       req.user,
       parsed
     );
+    logAudit(req.user, req.auditAction, {
+      status: 'success',
+      metadata: { appointmentId: req.params.appointmentId, date: parsed.date }
+    });
     res.json({ appointment });
   } catch (err) {
     next(err);
@@ -127,9 +157,14 @@ export async function acceptAlternative(req, res, next) {
 }
 
 export async function cancelAppointment(req, res, next) {
+  req.auditAction = 'Cancel Appointment';
   try {
     requireUserScope(req.user, 'appointment:update');
     const appointment = await appointmentService.cancelAppointment(req.params.appointmentId, req.user);
+    logAudit(req.user, req.auditAction, {
+      status: 'success',
+      metadata: { appointmentId: req.params.appointmentId }
+    });
     res.json({ appointment });
   } catch (err) {
     next(err);
@@ -137,9 +172,14 @@ export async function cancelAppointment(req, res, next) {
 }
 
 export async function completeAppointment(req, res, next) {
+  req.auditAction = 'Complete Appointment';
   try {
     requireUserScope(req.user, 'appointment:update');
     const appointment = await appointmentService.completeAppointment(req.params.appointmentId, req.user);
+    logAudit(req.user, req.auditAction, {
+      status: 'success',
+      metadata: { appointmentId: req.params.appointmentId }
+    });
     res.json({ appointment });
   } catch (err) {
     next(err);
@@ -147,6 +187,7 @@ export async function completeAppointment(req, res, next) {
 }
 
 export async function updateAppointment(req, res, next) {
+  req.auditAction = 'Admin Update Appointment';
   try {
     requireUserScope(req.user, 'appointment:update');
     const appointment = await appointmentService.adminUpdateAppointment(
@@ -154,6 +195,10 @@ export async function updateAppointment(req, res, next) {
       req.body || {},
       req.user
     );
+    logAudit(req.user, req.auditAction, {
+      status: 'success',
+      metadata: { appointmentId: req.params.appointmentId }
+    });
     res.json({ appointment });
   } catch (err) {
     next(err);
