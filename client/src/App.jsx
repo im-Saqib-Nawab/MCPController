@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Route, Routes } from 'react-router-dom';
 import Navbar from './components/Navbar.jsx';
 import ProtectedRoute from './components/ProtectedRoute.jsx';
+import AdminRoute from './components/AdminRoute.jsx';
 import Home from './pages/Home.jsx';
 import Login from './pages/Login.jsx';
 import Register from './pages/Register.jsx';
@@ -11,6 +12,7 @@ import DoctorDetail from './pages/DoctorDetail.jsx';
 import Profile from './pages/Profile.jsx';
 import Authorize from './pages/Authorize.jsx';
 import Success from './pages/Success.jsx';
+import Observability from './pages/Observability.jsx';
 import { api } from './services/api.js';
 
 export default function App() {
@@ -78,6 +80,14 @@ export default function App() {
             <ProtectedRoute user={user} loading={loading}>
               <Authorize user={user} />
             </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/admin/observability"
+          element={
+            <AdminRoute user={user} loading={loading}>
+              <Observability />
+            </AdminRoute>
           }
         />
         <Route path="/oauth/success" element={<Success />} />

@@ -23,7 +23,6 @@ export const SCOPE_LABELS = {
   'availability:update': 'Update availability',
   'profile:read': 'Read own profile',
   'profile:update': 'Update own profile',
-  'logs:read': 'Read system logs',
   [LEGACY_WRITE_SCOPE]: 'Add & update doctors'
 };
 
@@ -79,9 +78,7 @@ export const TOOL_SCOPES = {
   check_doctor_availability: 'availability:read',
   update_availability: 'availability:update',
   get_my_profile: 'profile:read',
-  update_my_profile: 'profile:update',
-  search_logs: 'logs:read',
-  get_request_logs: 'logs:read'
+  update_my_profile: 'profile:update'
 };
 
 export const ACCEPTED_REQUEST_SCOPES = [...config.scopes, LEGACY_WRITE_SCOPE];
@@ -179,47 +176,46 @@ export function advertisedScopes() {
   return [...config.scopes, LEGACY_WRITE_SCOPE];
 }
 
-const ADMIN_ONLY_TOOLS = new Set(['admin_update_appointment', 'admin_get_dashboard_stats']);
-const LOG_TOOLS = new Set(['search_logs', 'get_request_logs']);
+const ADMIN_ONLY_TOOLS = new Set([
+  'admin_update_appointment',
+  'admin_get_dashboard_stats',
+  'search_logs',
+  'get_request_logs'
+]);
 
-export function isToolExposed(toolName, grantedScopes, role, effectiveScopes = grantedScopes) {
+export function isToolExposed(toolName, grantedScopes, role) {
+  if (ADMIN_ONLY_TOOLS.has(toolName)) {
+    return role === ROLES.ADMIN;
+  }
+
   const required = TOOL_SCOPES[toolName];
   if (!required) {
     return false;
-  }
-
-  if (LOG_TOOLS.has(toolName)) {
-    if (role === ROLES.ADMIN) {
-      return true;
-    }
-    return hasScope(effectiveScopes, required);
   }
 
   if (!hasScope(grantedScopes, required)) {
     return false;
   }
 
-  if (ADMIN_ONLY_TOOLS.has(toolName) && role !== ROLES.ADMIN) {
-    return false;
-  }
-
   return true;
 }
 
-export function assertLogToolAllowed(toolName, grantedScopes, role, effectiveScopes = grantedScopes) {
-  if (role === ROLES.ADMIN) {
-    return;
+export function assertLogToolAllowed(_toolName, _grantedScopes, role) {
+  if (role !== ROLES.ADMIN) {
+    logOperation('warn', 'permission.denied', {
+      requiredRole: ROLES.ADMIN,
+      actualRole: role,
+      tool: _toolName
+    });
+    throw new AppError(
+      403,
+      'permission_denied',
+      'Administrator access required for log tools.'
+    );
   }
-
-  if (hasScope(effectiveScopes, 'logs:read')) {
-    return;
-  }
-
-  assertToolAllowed(toolName, grantedScopes);
 }
 
-export function exposedToolNames(grantedScopes, role, effectiveScopes = grantedScopes) {
-  return Object.keys(TOOL_SCOPES).filter((toolName) =>
-    isToolExposed(toolName, grantedScopes, role, effectiveScopes)
-  );
+export function exposedToolNames(grantedScopes, role) {
+  const allTools = [...new Set([...Object.keys(TOOL_SCOPES), ...ADMIN_ONLY_TOOLS])];
+  return allTools.filter((toolName) => isToolExposed(toolName, grantedScopes, role));
 }

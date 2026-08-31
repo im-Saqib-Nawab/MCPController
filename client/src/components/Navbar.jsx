@@ -26,6 +26,11 @@ export default function Navbar({ user, onLogout }) {
               <Link to="/dashboard" className="text-slate-600 hover:text-slate-900">
                 Dashboard
               </Link>
+              {user.role === 'admin' ? (
+                <Link to="/admin/observability" className="text-slate-600 hover:text-slate-900">
+                  Observability
+                </Link>
+              ) : null}
               <Link to="/doctors" className="text-slate-600 hover:text-slate-900">
                 Doctors
               </Link>

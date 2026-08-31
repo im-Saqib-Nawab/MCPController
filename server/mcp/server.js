@@ -98,20 +98,17 @@ function wrap(toolName, handler, authInfo) {
  */
 export function buildMcpServer(authInfo) {
   const grantedScopes = Array.isArray(authInfo?.scopes) ? authInfo.scopes : [];
-  const effectiveScopes = Array.isArray(authInfo?.extra?.effectiveScopes)
-    ? authInfo.extra.effectiveScopes
-    : grantedScopes;
   const role = authInfo?.extra?.role;
 
   const server = new McpServer({
     name: config.mcpServerName,
     version: config.mcpServerVersion,
     instructions:
-      'Doctor-patient appointment MCP for the full clinic system. Roles: admin (manage everything), doctor (own profile, availability, appointment requests), patient (browse doctors, book appointments). Appointment statuses: REQUESTED (pending), ACCEPTED, REJECTED, ALTERNATIVE_OFFERED, CANCELLED, COMPLETED. Backend rules: one accepted patient per doctor per day; cancelled/rejected days become available again; no self-booking; no past dates; no booking on unavailable weekdays. Tools are filtered to OAuth token scopes. Log tools (search_logs, get_request_logs) follow website permissions: admins always have them; other users need Read system logs enabled in the admin dashboard.'
+      'Doctor-patient appointment MCP for the full clinic system. Roles: admin (manage everything), doctor (own profile, availability, appointment requests), patient (browse doctors, book appointments). Appointment statuses: REQUESTED (pending), ACCEPTED, REJECTED, ALTERNATIVE_OFFERED, CANCELLED, COMPLETED. Backend rules: one accepted patient per doctor per day; cancelled/rejected days become available again; no self-booking; no past dates; no booking on unavailable weekdays. Tools are filtered to OAuth token scopes. Log tools (search_logs, get_request_logs) are administrator-only.'
   });
 
   function registerAllowed(toolName, definition, handler) {
-    if (!isToolExposed(toolName, grantedScopes, role, effectiveScopes)) {
+    if (!isToolExposed(toolName, grantedScopes, role)) {
       return;
     }
 
@@ -465,7 +462,7 @@ export function buildMcpServer(authInfo) {
     'search_logs',
     {
       description:
-        'Search persisted server logs for debugging OAuth, MCP, API, and database issues. Requires logs:read. Admins can search all logs; other users only see their own activity.',
+        'Search persisted server logs for debugging OAuth, MCP, API, and database issues. Administrator only.',
       inputSchema: z.object({
         requestId: z.string().optional().describe('Filter by correlation/request ID'),
         operation: z.string().optional().describe('Filter by operation name, e.g. mcp.tool.failed'),
@@ -484,7 +481,7 @@ export function buildMcpServer(authInfo) {
     'get_request_logs',
     {
       description:
-        'Return all persisted logs for one requestId in chronological order. Requires logs:read. Use this to trace a single request end-to-end.',
+        'Return all persisted logs for one requestId in chronological order. Administrator only. Use this to trace a single request end-to-end.',
       inputSchema: z.object({
         requestId: z.string().min(1).describe('The x-request-id / correlation ID to trace')
       }),

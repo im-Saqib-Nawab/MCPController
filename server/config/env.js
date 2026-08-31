@@ -57,8 +57,7 @@ export const config = {
     'availability:read',
     'availability:update',
   'profile:read',
-  'profile:update',
-  'logs:read'
+  'profile:update'
   ],
   rootDir: root,
   serverDir,

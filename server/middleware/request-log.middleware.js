@@ -66,18 +66,14 @@ export function requestLogMiddleware(req, res, next) {
       const level =
         res.statusCode >= 500 ? 'error' : res.statusCode >= 400 ? 'warn' : 'info';
 
-      context.log[level](
-        {
-          operation: 'http.request.completed',
-          method: req.method,
-          route: req.path,
-          routeKind,
-          statusCode: res.statusCode,
-          durationMs,
-          ...actorFromRequest(req)
-        },
-        `${req.method} ${req.path} ${res.statusCode}`
-      );
+      logOperation(level, 'http.request.completed', {
+        method: req.method,
+        route: req.path,
+        routeKind,
+        statusCode: res.statusCode,
+        durationMs,
+        ...actorFromRequest(req)
+      });
     });
 
     next();

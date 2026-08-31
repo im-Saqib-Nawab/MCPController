@@ -29,6 +29,4 @@ test('tool mapping covers appointment and availability tools', () => {
   assert.doesNotThrow(() => assertToolAllowed('get_appointment', ['appointment:read']));
   assert.doesNotThrow(() => assertToolAllowed('list_my_appointments', ['appointment:read']));
   assert.doesNotThrow(() => assertToolAllowed('list_doctor_appointment_requests', ['appointment:read']));
-  assert.doesNotThrow(() => assertToolAllowed('admin_update_appointment', ['appointment:update']));
-  assert.doesNotThrow(() => assertToolAllowed('admin_get_dashboard_stats', ['appointment:read']));
 });

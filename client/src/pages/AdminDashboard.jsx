@@ -183,6 +183,11 @@ export default function AdminDashboard({ user }) {
     <main className="mx-auto max-w-6xl px-4 py-10">
       <h1 className="text-3xl font-semibold text-slate-900">Admin dashboard</h1>
       <p className="mt-2 text-slate-600">{user.name} · {user.email}</p>
+      <p className="mt-2 text-sm">
+        <Link to="/admin/observability" className="text-slate-700 underline hover:text-slate-900">
+          Open observability
+        </Link>
+      </p>
 
       {error ? <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
       {success ? <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{success}</div> : null}
