@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import Button from '../components/Button.jsx';
 import PermissionCard from '../components/PermissionCard.jsx';
 import AppointmentBadge from '../components/AppointmentBadge.jsx';
+import FeatureFlagPanel from '../components/FeatureFlagPanel.jsx';
 import { api, getErrorMessage } from '../services/api.js';
 
 export default function AdminDashboard({ user }) {
@@ -204,6 +205,14 @@ export default function AdminDashboard({ user }) {
             <p className="mt-2 text-2xl font-semibold text-slate-900">{value ?? 0}</p>
           </article>
         ))}
+      </section>
+
+      <section className="mt-10">
+        <h2 className="text-lg font-semibold text-slate-900">Feature flags</h2>
+        <p className="mt-1 text-sm text-slate-500">Control rollout of Medicine & Health Tips for doctors and patients.</p>
+        <div className="mt-4">
+          <FeatureFlagPanel doctors={doctors} />
+        </div>
       </section>
 
       <section className="mt-10 grid gap-6 lg:grid-cols-2">

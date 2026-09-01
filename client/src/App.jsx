@@ -9,6 +9,7 @@ import Register from './pages/Register.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import Doctors from './pages/Doctors.jsx';
 import DoctorDetail from './pages/DoctorDetail.jsx';
+import Medicines from './pages/Medicines.jsx';
 import Profile from './pages/Profile.jsx';
 import Authorize from './pages/Authorize.jsx';
 import Success from './pages/Success.jsx';
@@ -63,6 +64,14 @@ export default function App() {
           element={
             <ProtectedRoute user={user} loading={loading}>
               <DoctorDetail user={user} />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/medicines"
+          element={
+            <ProtectedRoute user={user} loading={loading}>
+              <Medicines user={user} />
             </ProtectedRoute>
           }
         />

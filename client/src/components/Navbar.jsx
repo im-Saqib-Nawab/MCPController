@@ -31,6 +31,11 @@ export default function Navbar({ user, onLogout }) {
                   Observability
                 </Link>
               ) : null}
+              {user.features?.medicine_health_tips?.canView ? (
+                <Link to="/medicines" className="text-slate-600 hover:text-slate-900">
+                  Medicines
+                </Link>
+              ) : null}
               <Link to="/doctors" className="text-slate-600 hover:text-slate-900">
                 Doctors
               </Link>

@@ -8,6 +8,7 @@ import { defaultWeeklyAvailability, summarizeAvailability } from '../lib/availab
 import { defaultScopesForRole } from './permission.service.js';
 import { revokeUserTokens } from './token.service.js';
 import { Connection } from '../models/Connection.js';
+import { featuresForUser } from './featureFlag.service.js';
 
 function cookieMaxAgeMs() {
   const value = String(config.jwtExpiresIn || '7d');
@@ -72,6 +73,7 @@ export async function serializeUserWithProfile(user) {
     extras.weeklyAvailability = doctor?.weeklyAvailability || defaultWeeklyAvailability();
     extras.availability = doctor?.availability || summarizeAvailability(doctor?.weeklyAvailability);
   }
+  extras.features = await featuresForUser(user);
   return serializeUser(user, extras);
 }
 

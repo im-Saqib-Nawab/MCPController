@@ -10,6 +10,9 @@ router.get('/users', adminController.listAllUsers);
 router.patch('/users/:userId/permissions', adminController.updatePermissions);
 router.get('/scopes', adminController.listScopeOptions);
 router.get('/stats', adminController.stats);
+router.get('/feature-flags', adminController.listFlags);
+router.get('/feature-flags/:key', adminController.getFlag);
+router.patch('/feature-flags/:key', adminController.patchFlag);
 
 router.get('/observability/overview', observabilityController.overview);
 router.get('/observability/filters', observabilityController.filters);

@@ -92,12 +92,13 @@ async function syncCollectionIndexes() {
   if (cache.indexesReady) return;
   const { Doctor } = await import('../models/Doctor.js');
   const { Appointment } = await import('../models/Appointment.js');
+  const { Medicine } = await import('../models/Medicine.js');
   try {
     await Doctor.collection.dropIndex('userId_1');
   } catch {
     // The previous unique userId index may not exist.
   }
-  await Promise.all([Doctor.syncIndexes(), Appointment.syncIndexes()]);
+  await Promise.all([Doctor.syncIndexes(), Appointment.syncIndexes(), Medicine.syncIndexes()]);
   cache.indexesReady = true;
 }
 

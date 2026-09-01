@@ -2,11 +2,14 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import Button from '../components/Button.jsx';
 import AvailabilityGrid from '../components/AvailabilityGrid.jsx';
+import MedicineList from '../components/MedicineList.jsx';
 import { api, getErrorMessage } from '../services/api.js';
 
 export default function DoctorDetail({ user }) {
   const { doctorId } = useParams();
   const [doctor, setDoctor] = useState(null);
+  const [medicines, setMedicines] = useState([]);
+  const [medicinesAvailable, setMedicinesAvailable] = useState(false);
   const [selectedDate, setSelectedDate] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -16,6 +19,21 @@ export default function DoctorDetail({ user }) {
   async function load() {
     const { data } = await api.get(`/doctors/${doctorId}`);
     setDoctor(data.doctor);
+
+    const canTryMedicines = Boolean(user?.features?.medicine_health_tips?.canView);
+    if (canTryMedicines) {
+      try {
+        const medicinesRes = await api.get('/medicines', { params: { doctorId } });
+        setMedicines(medicinesRes.data.medicines || []);
+        setMedicinesAvailable(true);
+      } catch {
+        setMedicines([]);
+        setMedicinesAvailable(false);
+      }
+    } else {
+      setMedicines([]);
+      setMedicinesAvailable(false);
+    }
   }
 
   useEffect(() => {
@@ -86,6 +104,18 @@ export default function DoctorDetail({ user }) {
           <p className="mt-4 text-sm text-slate-500">Log in as a patient to request an appointment.</p>
         )}
       </section>
+
+      {medicinesAvailable ? (
+        <section className="mt-8 rounded-xl border border-slate-200 bg-white p-5">
+          <h2 className="font-semibold text-slate-900">Medicine & Health Tips</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            Common medicines and simple care guidance from {doctor.name}.
+          </p>
+          <div className="mt-4">
+            <MedicineList medicines={medicines} emptyMessage="This doctor has not listed any medicines yet." />
+          </div>
+        </section>
+      ) : null}
     </main>
   );
 }

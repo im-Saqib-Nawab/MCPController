@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Button from '../components/Button.jsx';
 import AppointmentBadge from '../components/AppointmentBadge.jsx';
+import MedicineManager from '../components/MedicineManager.jsx';
 import { WeeklyEditor } from '../components/AvailabilityGrid.jsx';
 import { STATUS_META, weekdayLabel } from '../lib/status.js';
 import { api, getErrorMessage } from '../services/api.js';
@@ -41,6 +42,7 @@ export default function DoctorDashboard({ user }) {
   const pending = appointments.filter((item) => ['REQUESTED', 'ALTERNATIVE_OFFERED', 'RESCHEDULED'].includes(item.status));
   const confirmed = appointments.filter((item) => item.status === 'ACCEPTED');
   const history = appointments.filter((item) => ['REJECTED', 'CANCELLED', 'COMPLETED'].includes(item.status));
+  const canManageMedicines = Boolean(user.features?.medicine_health_tips?.canManage);
   const today = new Date().toISOString().slice(0, 10);
   const todayAppointments = appointments.filter(
     (item) => item.date === today && ['ACCEPTED', 'REQUESTED', 'ALTERNATIVE_OFFERED', 'RESCHEDULED'].includes(item.status)
@@ -100,6 +102,18 @@ export default function DoctorDashboard({ user }) {
           <Button onClick={saveAvailability}>Save availability</Button>
         </div>
       </section>
+
+      {canManageMedicines ? (
+        <section className="mt-10 rounded-xl border border-slate-200 bg-white p-5">
+          <h2 className="font-semibold text-slate-900">Medicine & Health Tips</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            Add medicines your patients can read, with common uses and simple care tips for minor situations.
+          </p>
+          <div className="mt-4">
+            <MedicineManager />
+          </div>
+        </section>
+      ) : null}
 
       <section className="mt-10">
         <h2 className="text-lg font-semibold text-slate-900">Today&apos;s appointments</h2>

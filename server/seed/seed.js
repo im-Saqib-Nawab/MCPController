@@ -9,6 +9,8 @@ import { config } from '../config/env.js';
 import { ensureAdminUser } from '../services/auth.service.js';
 import { defaultWeeklyAvailability, summarizeAvailability } from '../lib/availability.js';
 import { defaultScopesForRole } from '../services/permission.service.js';
+import { getOrCreateFlag, updateFeatureFlag } from '../services/featureFlag.service.js';
+import { Medicine } from '../models/Medicine.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 dotenv.config({ path: path.join(root, '.env') });
@@ -145,6 +147,41 @@ async function seed() {
     age: 41,
     gender: 'male'
   });
+
+  const adminUser = await ensureAdminUser();
+  const flag = await getOrCreateFlag();
+  await updateFeatureFlag(
+    flag.key,
+    {
+      enabled: true,
+      doctorAccess: 'all',
+      patientsEnabled: true
+    },
+    adminUser
+  );
+
+  const ahmedDoctor = await Doctor.findOne({ email: 'ahmed@clinic.example' }).lean();
+  if (ahmedDoctor) {
+    await Medicine.deleteMany({ doctorId: ahmedDoctor._id });
+    await Medicine.insertMany([
+      {
+        name: 'Paracetamol',
+        usedFor: 'Pain and fever relief for headaches, muscle aches, and mild colds.',
+        careTips: 'Take with water. Avoid exceeding the recommended daily dose.',
+        warnings: 'See a doctor if fever lasts more than 3 days or pain worsens.',
+        category: 'Pain relief',
+        doctorId: ahmedDoctor._id
+      },
+      {
+        name: 'Saline Nasal Spray',
+        usedFor: 'Relieving nasal congestion from colds or allergies.',
+        careTips: 'Use before bed to help with sleep. Gently blow your nose first.',
+        warnings: 'Stop use and consult a doctor if irritation persists.',
+        category: 'Cold & flu',
+        doctorId: ahmedDoctor._id
+      }
+    ]);
+  }
 
   console.log('Sample doctors and patients are ready.');
   await disconnectDatabase();

@@ -15,6 +15,7 @@ import connectionRoutes from './routes/connection.routes.js';
 import doctorRoutes from './routes/doctor.routes.js';
 import patientRoutes from './routes/patient.routes.js';
 import appointmentRoutes from './routes/appointment.routes.js';
+import medicineRoutes from './routes/medicine.routes.js';
 import mcpRoutes from './routes/mcp.routes.js';
 import oauthRoutes, {
   oauthApiRouter
@@ -239,6 +240,7 @@ app.use('/api/connections', connectionRoutes);
 app.use('/api/doctors', doctorRoutes);
 app.use('/api/patients', patientRoutes);
 app.use('/api/appointments', appointmentRoutes);
+app.use('/api/medicines', medicineRoutes);
 app.use('/api/oauth', oauthApiRouter);
 
 app.use('/oauth', oauthRoutes);
