@@ -343,18 +343,6 @@ export default function TestingCenter() {
     return <div className="mx-auto max-w-7xl px-4 py-10 text-sm text-slate-500">Loading Testing Center...</div>;
   }
 
-  if (config && !config.enabled) {
-    return (
-      <div className="mx-auto max-w-3xl px-4 py-10">
-        <h1 className="text-2xl font-semibold text-slate-900">Testing Center</h1>
-        <p className="mt-3 text-sm text-slate-600">
-          Testing Center is disabled in production. Set <code className="rounded bg-slate-100 px-1">ENABLE_TEST_CENTER=true</code>{' '}
-          to enable it.
-        </p>
-      </div>
-    );
-  }
-
   return (
     <div className="mx-auto max-w-7xl space-y-6 px-4 py-8">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -473,6 +461,12 @@ export default function TestingCenter() {
             <Button onClick={startTest} disabled={isRunning || starting}>{starting ? 'Starting...' : 'Start test'}</Button>
             <Button variant="secondary" onClick={stopTest} disabled={!isRunning}>Stop</Button>
           </div>
+
+          {config?.limits?.serverless ? (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              Running on Vercel/serverless — tests are capped at {config.limits.maxVu} VUs and {config.limits.maxDurationSec}s so they finish within platform limits. No extra env vars required.
+            </p>
+          ) : null}
 
           <p className="text-xs text-slate-400">{config?.personas?.note}</p>
         </section>

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import * as authController from '../controllers/auth.controller.js';
 import { requireUser } from '../middleware/auth.middleware.js';
+import { isLoadTestRunning } from '../services/testCenter.service.js';
 
 const router = Router();
 
@@ -10,7 +11,10 @@ const authLimiter = rateLimit({
   limit: 30,
   standardHeaders: true,
   legacyHeaders: false,
-  skip: () => process.env.NODE_ENV === 'test' || process.env.LOAD_TEST === 'true'
+  skip: () =>
+    process.env.NODE_ENV === 'test' ||
+    process.env.LOAD_TEST === 'true' ||
+    isLoadTestRunning()
 });
 
 router.post('/register', authLimiter, authController.register);

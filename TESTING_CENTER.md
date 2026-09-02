@@ -670,32 +670,29 @@ For deep investigation after a test, open **Observability** with a wider time wi
 
 ## How to run locally
 
-### Terminal 1 — API server (load-test mode)
+### Terminal 1 — API server
 
 ```powershell
-cd "e:\Code\Project\Main Projects\MCPController"
-
-$env:LOAD_TEST="true"
-$env:LOG_LEVEL="info"
 npm run server
 ```
 
-`LOAD_TEST=true` disables auth rate limiting so virtual users can all log in.
+Auth rate limits are relaxed automatically while a Testing Center test is running — you do not need `LOAD_TEST=true`.
+
+Optional: `$env:LOG_LEVEL="info"` for more verbose server logs during tests.
 
 ### Terminal 2 — seed + frontend
 
 ```powershell
 npm run seed    # first time only
-npm run dev     # Vite on :5173, proxies /api to :3000
+npm run dev
 ```
 
 ### Browser
 
 1. Open `http://localhost:5173`
 2. Log in as **admin**
-3. Navbar → **Testing Center** (or `/admin/testing`)
+3. Navbar → **Testing Center**
 4. Configure → **Start test**
-5. Watch tabs and summary
 
 **Do not** set `NODE_ENV=test` on the server — that stops logs from persisting to MongoDB.
 
@@ -703,20 +700,13 @@ npm run dev     # Vite on :5173, proxies /api to :3000
 
 ## How to run on Vercel
 
-1. Set environment variables:
-   - `ENABLE_TEST_CENTER=true`
-   - `LOAD_TEST=true`
-   - `LOG_LEVEL=info`
-   - `MONGODB_URI`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`, etc.
+1. Deploy as usual with your normal env vars (`MONGODB_URI`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `APP_URL`, `API_URL`, etc.).
+2. Seed Atlas once from your machine: `npm run seed`
+3. Log in as **admin** → open **Testing Center** (`/admin/testing`) → start a test.
 
-2. Seed Atlas from your machine: `npm run seed`
+**No `ENABLE_TEST_CENTER` or `LOAD_TEST` needed.** The UI detects Vercel and caps tests at 20 VUs / 45 seconds automatically.
 
-3. Open `https://your-app.vercel.app/admin/testing`
-
-**Vercel limits:**
-
-- Serverless **max 60 seconds** per function — keep tests **short** (5–10 VUs, 20–40s)
-- For heavy load, use CLI from your laptop:
+For heavier load against production, use the CLI from your laptop:
 
 ```powershell
 $env:LOAD_TEST_URL="https://your-app.vercel.app"
@@ -729,11 +719,12 @@ npm run load:smoke
 
 | Rule | Reason |
 | --- | --- |
-| **Admin-only** | All `/api/admin/testing/*` routes require admin role |
-| **Disabled in production by default** | Needs `ENABLE_TEST_CENTER=true` |
-| **Seeded accounts only** | No arbitrary user impersonation |
-| **Max 500 VUs** | Protects your machine / serverless instance |
-| **Max 3600s duration** | Prevents runaway tests |
+| **Admin-only** | All `/api/admin/testing/*` routes require admin role — this is the security gate |
+| **No extra env vars** | Works on Vercel/local without `ENABLE_TEST_CENTER` or `LOAD_TEST` |
+| **Auto rate-limit bypass** | Login rate limits are skipped only while a Testing Center run is active |
+| **Seeded accounts only** | Virtual users use demo doctor/patient/admin seed accounts |
+| **Vercel auto caps** | On Vercel (`VERCEL` detected): max **20 VUs**, **45s** duration (serverless 60s limit) |
+| **Local caps** | Up to **500 VUs**, **3600s** duration (override with `TEST_CENTER_MAX_VU` / `TEST_CENTER_MAX_DURATION_SEC` if needed) |
 | **Feature flag restored** | After feature-flag scenario, previous flag settings are put back |
 
 Appointment booking during tests creates **real test data** in MongoDB (bookings may be cancelled in the same loop, but some records can remain).
@@ -745,11 +736,11 @@ Appointment booking during tests creates **real test data** in MongoDB (bookings
 | Problem | Fix |
 | --- | --- |
 | Empty server logs tab | Ensure server is not in `NODE_ENV=test`; run with `LOG_LEVEL=info` |
-| Login failures in live requests | Run `npm run seed`; set `LOAD_TEST=true` on server |
+| Login failures in live requests | Run `npm run seed`; confirm demo account passwords |
 | Flat / empty charts | Wait until a few requests complete; charts need active or selected run |
 | Recent run click shows nothing | Refresh page; ensure server was not restarted (in-memory history clears) |
 | Feature-flag mismatches | Check rollout percentage vs small doctor count; see [LOAD_TESTING.md](./LOAD_TESTING.md) |
-| Testing Center disabled | Set `ENABLE_TEST_CENTER=true` on Vercel |
+| 429 on login during test | Should not happen while a run is active; retry after run completes |
 
 ---
 
@@ -773,8 +764,8 @@ Appointment booking during tests creates **real test data** in MongoDB (bookings
 ```text
 ┌─────────────────────────────────────────────────────────────┐
 │  LOCAL QUICK START                                          │
-│  1. LOAD_TEST=true npm run server                           │
-│  2. npm run seed && npm run dev                             │
+│  1. npm run server && npm run dev                           │
+│  2. npm run seed (once)                                     │
 │  3. Admin → Testing Center → Start test                     │
 ├─────────────────────────────────────────────────────────────┤
 │  KEY METRICS                                                │

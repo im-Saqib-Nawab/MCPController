@@ -6,20 +6,16 @@ MCPController includes a **Node.js load-testing harness** and an **Admin Testing
 
 ## Testing Center (recommended)
 
-1. Start the server with load-test mode so auth rate limits are relaxed:
+1. Log in as **admin** and open **Testing Center** in the navbar (or `/admin/testing`).
+2. Choose a scenario, configure virtual users / duration / role mix, and click **Start test**.
+3. Monitor live RPS, latency, logs, traces, and feature-flag results in the dashboard.
+4. Review the final **PASS / WARN / FAIL** summary when the run completes.
 
-```powershell
-$env:LOAD_TEST="true"
-$env:LOG_LEVEL="info"
-npm run server
-```
+No extra environment variables are required — access is **admin-only**, and auth rate limits are relaxed automatically while a test is running.
 
-2. Log in as admin and open **Testing Center** in the navbar (or `/admin/testing`).
-3. Choose a scenario, configure virtual users / duration / role mix, and click **Start test**.
-4. Monitor live RPS, latency, logs, traces, and feature-flag results in the dashboard.
-5. Review the final **PASS / WARN / FAIL** summary when the run completes.
+For local development, run the server normally (`npm run server` or `npm run dev`). Optional: `LOG_LEVEL=info` for verbose server logs during tests.
 
-Production requires `ENABLE_TEST_CENTER=true` in environment variables.
+See [TESTING_CENTER.md](./TESTING_CENTER.md) for the full guide.
 
 ## CLI harness
 

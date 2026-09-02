@@ -16,8 +16,9 @@ import {
 import { MEDICINE_FEATURE_KEY } from '../lib/medicines.js';
 import * as observabilityService from './observability.service.js';
 
-const MAX_VU = Number(process.env.TEST_CENTER_MAX_VU) || 500;
-const MAX_DURATION_SEC = Number(process.env.TEST_CENTER_MAX_DURATION_SEC) || 3600;
+const onServerless = Boolean(process.env.VERCEL);
+const MAX_VU = Number(process.env.TEST_CENTER_MAX_VU) || (onServerless ? 20 : 500);
+const MAX_DURATION_SEC = Number(process.env.TEST_CENTER_MAX_DURATION_SEC) || (onServerless ? 45 : 3600);
 
 const SCENARIOS = {
   normal: {
@@ -74,14 +75,10 @@ const SCENARIOS = {
 let activeRun = null;
 const history = [];
 
-function assertEnabled() {
-  if (config.isProduction && process.env.ENABLE_TEST_CENTER !== 'true') {
-    throw new AppError(
-      403,
-      'forbidden',
-      'Testing Center is disabled in production. Set ENABLE_TEST_CENTER=true to enable.'
-    );
-  }
+/** True while the Testing Center is driving load-test logins (relaxes auth rate limits). */
+export function isLoadTestRunning() {
+  if (!activeRun) return false;
+  return ['running', 'starting', 'stopping'].includes(activeRun.status);
 }
 
 function createRunId() {
@@ -144,11 +141,12 @@ function computeVerdict({ summary, observability, featureFlags, includeFailures 
 
 export function getConfig() {
   return {
-    enabled: !config.isProduction || process.env.ENABLE_TEST_CENTER === 'true',
+    enabled: true,
     baseUrl: getBaseUrl(),
     limits: {
       maxVu: MAX_VU,
-      maxDurationSec: MAX_DURATION_SEC
+      maxDurationSec: MAX_DURATION_SEC,
+      serverless: onServerless
     },
     scenarios: Object.values(SCENARIOS),
     defaultRoleDistribution: { admin: 10, doctor: 50, patient: 40 },
@@ -181,8 +179,6 @@ export function getStatus() {
 }
 
 export async function startRun(actor, rawConfig = {}) {
-  assertEnabled();
-
   if (activeRun && activeRun.status === 'running') {
     throw new AppError(409, 'conflict', 'A test run is already in progress.');
   }
@@ -356,7 +352,6 @@ function finalizeRun(run) {
 }
 
 export function stopRun() {
-  assertEnabled();
   if (!activeRun || activeRun.status !== 'running') {
     throw new AppError(404, 'not_found', 'No active test run.');
   }
