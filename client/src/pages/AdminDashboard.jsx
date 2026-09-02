@@ -185,6 +185,10 @@ export default function AdminDashboard({ user }) {
       <h1 className="text-3xl font-semibold text-slate-900">Admin dashboard</h1>
       <p className="mt-2 text-slate-600">{user.name} · {user.email}</p>
       <p className="mt-2 text-sm">
+        <Link to="/admin/testing" className="text-slate-700 underline hover:text-slate-900">
+          Open Testing Center
+        </Link>
+        {' · '}
         <Link to="/admin/observability" className="text-slate-700 underline hover:text-slate-900">
           Open observability
         </Link>

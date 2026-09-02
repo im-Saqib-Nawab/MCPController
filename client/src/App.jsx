@@ -14,6 +14,7 @@ import Profile from './pages/Profile.jsx';
 import Authorize from './pages/Authorize.jsx';
 import Success from './pages/Success.jsx';
 import Observability from './pages/Observability.jsx';
+import TestingCenter from './pages/TestingCenter.jsx';
 import { api } from './services/api.js';
 
 export default function App() {
@@ -89,6 +90,14 @@ export default function App() {
             <ProtectedRoute user={user} loading={loading}>
               <Authorize user={user} />
             </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/admin/testing"
+          element={
+            <AdminRoute user={user} loading={loading}>
+              <TestingCenter />
+            </AdminRoute>
           }
         />
         <Route

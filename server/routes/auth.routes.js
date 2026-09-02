@@ -10,7 +10,7 @@ const authLimiter = rateLimit({
   limit: 30,
   standardHeaders: true,
   legacyHeaders: false,
-  skip: () => process.env.NODE_ENV === 'test'
+  skip: () => process.env.NODE_ENV === 'test' || process.env.LOAD_TEST === 'true'
 });
 
 router.post('/register', authLimiter, authController.register);

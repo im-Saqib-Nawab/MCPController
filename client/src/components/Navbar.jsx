@@ -27,9 +27,14 @@ export default function Navbar({ user, onLogout }) {
                 Dashboard
               </Link>
               {user.role === 'admin' ? (
-                <Link to="/admin/observability" className="text-slate-600 hover:text-slate-900">
-                  Observability
-                </Link>
+                <>
+                  <Link to="/admin/testing" className="text-slate-600 hover:text-slate-900">
+                    Testing Center
+                  </Link>
+                  <Link to="/admin/observability" className="text-slate-600 hover:text-slate-900">
+                    Observability
+                  </Link>
+                </>
               ) : null}
               {user.features?.medicine_health_tips?.canView ? (
                 <Link to="/medicines" className="text-slate-600 hover:text-slate-900">

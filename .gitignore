@@ -8,4 +8,5 @@ coverage/
 Thumbs.db
 client/dist/
 server/dist/
+load-tests/reports/
 *.local

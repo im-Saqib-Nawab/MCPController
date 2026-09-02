@@ -15,7 +15,16 @@
     "build": "npm run build --workspace=client",
     "start": "npm run start --workspace=server",
     "seed": "npm run seed --workspace=server",
-    "test": "npm run test --workspace=server"
+    "test": "npm run test --workspace=server",
+    "load:smoke": "node load-tests/run.js smoke",
+    "load": "node load-tests/run.js load",
+    "load:levels": "node load-tests/run.js levels",
+    "load:stress": "node load-tests/run.js stress --failures",
+    "load:spike": "node load-tests/run.js spike --failures",
+    "load:soak": "node load-tests/run.js soak",
+    "load:flags": "node load-tests/run.js feature-flags",
+    "load:observability": "node load-tests/run.js observability",
+    "load:all": "node load-tests/run.js all --failures"
   },
   "engines": {
     "node": ">=20"

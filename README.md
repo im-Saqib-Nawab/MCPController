@@ -155,7 +155,9 @@ npm test
 npm run build
 ```
 
-See [OBSERVABILITY.md](./OBSERVABILITY.md) for logging, correlation IDs, and debugging OAuth/MCP issues.
+- [TESTING_CENTER.md](./TESTING_CENTER.md) — Admin Testing Center (VU, RPS, scenarios, logs, traces, feature flags)
+- [LOAD_TESTING.md](./LOAD_TESTING.md) — CLI load tests (`npm run load:smoke`, etc.)
+- [OBSERVABILITY.md](./OBSERVABILITY.md) — Logging, correlation IDs, debugging OAuth/MCP issues
 
 ## Vercel deployment
 
