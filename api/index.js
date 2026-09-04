@@ -3,10 +3,15 @@
  */
 
 import { initSentry } from '../server/lib/sentry.js';
+import app from '../server/app.js';
 
-initSentry();
+try {
+  initSentry();
+} catch (err) {
+  console.error('Sentry initialization failed:', err);
+}
 
-export { default } from '../server/app.js';
+export default app;
 
 export const config = {
   maxDuration: 60

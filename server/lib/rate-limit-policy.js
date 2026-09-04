@@ -1,5 +1,5 @@
 import { config } from '../config/env.js';
-import { isLoadTestRunning } from '../services/testCenter.service.js';
+import { isLoadTestRunning } from '../services/load-test-state.service.js';
 
 /**
  * Rate limits are skipped only in local development and automated tests.

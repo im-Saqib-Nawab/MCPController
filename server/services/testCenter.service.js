@@ -4,19 +4,58 @@ import os from 'node:os';
 import { config } from '../config/env.js';
 import { AppError } from '../middleware/error.middleware.js';
 import { BackgroundJob } from '../models/BackgroundJob.js';
-import { evaluateHealth } from '../../load-tests/lib/report.js';
-import { MetricsCollector } from '../../load-tests/lib/metrics.js';
-import { runManagedPlan, runSpikePlan } from '../../load-tests/lib/runner.js';
-import { createFeatureFlagTracker, buildExpectedFlagSummary } from '../../load-tests/lib/featureFlagTracker.js';
-import { normalizeRoleDistribution } from '../../load-tests/lib/personas.js';
-import { verifyObservability } from '../../load-tests/lib/observability-verify.js';
 import {
   getFeatureFlag,
   serializeFlag,
   updateFeatureFlag
 } from './featureFlag.service.js';
+import { setActiveLoadTestStatus } from './load-test-state.service.js';
 import { MEDICINE_FEATURE_KEY } from '../lib/medicines.js';
 import * as observabilityService from './observability.service.js';
+
+let loadTestHarnessPromise = null;
+
+async function getLoadTestHarness() {
+  if (!loadTestHarnessPromise) {
+    loadTestHarnessPromise = Promise.all([
+      import('../../load-tests/lib/report.js'),
+      import('../../load-tests/lib/metrics.js'),
+      import('../../load-tests/lib/runner.js'),
+      import('../../load-tests/lib/featureFlagTracker.js'),
+      import('../../load-tests/lib/observability-verify.js')
+    ]).then(([report, metrics, runner, featureFlagTracker, observabilityVerify]) => ({
+      evaluateHealth: report.evaluateHealth,
+      MetricsCollector: metrics.MetricsCollector,
+      runManagedPlan: runner.runManagedPlan,
+      runSpikePlan: runner.runSpikePlan,
+      createFeatureFlagTracker: featureFlagTracker.createFeatureFlagTracker,
+      buildExpectedFlagSummary: featureFlagTracker.buildExpectedFlagSummary,
+      verifyObservability: observabilityVerify.verifyObservability
+    }));
+  }
+
+  return loadTestHarnessPromise;
+}
+
+function normalizeRoleDistribution(input = {}) {
+  const admin = Math.max(0, Number(input.admin) || 0);
+  const doctor = Math.max(0, Number(input.doctor) || 0);
+  const patient = Math.max(0, Number(input.patient) || 0);
+  const total = admin + doctor + patient;
+
+  if (total <= 0) {
+    return { admin: 10, doctor: 50, patient: 40 };
+  }
+
+  return {
+    admin: Math.round((admin / total) * 100),
+    doctor: Math.round((doctor / total) * 100),
+    patient: Math.max(
+      0,
+      100 - Math.round((admin / total) * 100) - Math.round((doctor / total) * 100)
+    )
+  };
+}
 
 const JOB_TYPE = 'load-test';
 const INSTANCE_ID = `${os.hostname()}-${process.pid}`;
@@ -78,7 +117,6 @@ const SCENARIOS = {
 };
 
 let activeRun = null;
-let loadTestCache = { value: false, checkedAt: 0 };
 
 async function hasActiveJobInDatabase() {
   const job = await BackgroundJob.findOne({
@@ -88,21 +126,6 @@ async function hasActiveJobInDatabase() {
     .select('_id')
     .lean();
   return Boolean(job);
-}
-
-/** True while the Testing Center is driving load-test traffic (dev-only rate-limit bypass). */
-export async function isLoadTestRunning() {
-  if (activeRun) {
-    return ['running', 'starting', 'stopping'].includes(activeRun.status);
-  }
-
-  if (Date.now() - loadTestCache.checkedAt < 5000) {
-    return loadTestCache.value;
-  }
-
-  const value = await hasActiveJobInDatabase();
-  loadTestCache = { value, checkedAt: Date.now() };
-  return value;
 }
 
 function createRunId() {
@@ -136,7 +159,7 @@ function clampConfig(input = {}) {
   return merged;
 }
 
-function computeVerdict({ summary, observability, featureFlags, includeFailures }) {
+function computeVerdict({ summary, observability, featureFlags, includeFailures }, evaluateHealth) {
   const health = evaluateHealth(summary);
   const issues = [...health.issues];
 
@@ -230,6 +253,8 @@ export async function startRun(actor, rawConfig = {}) {
     );
   }
 
+  const harness = await getLoadTestHarness();
+
   if (activeRun && activeRun.status === 'running') {
     throw new AppError(409, 'conflict', 'A test run is already in progress.');
   }
@@ -241,8 +266,9 @@ export async function startRun(actor, rawConfig = {}) {
   const runConfig = clampConfig(rawConfig);
   const runId = createRunId();
   const abortController = new AbortController();
-  const metrics = new MetricsCollector();
-  const featureFlagTracker = runConfig.scenario === 'feature-flags' ? createFeatureFlagTracker() : null;
+  const metrics = new harness.MetricsCollector();
+  const featureFlagTracker =
+    runConfig.scenario === 'feature-flags' ? harness.createFeatureFlagTracker() : null;
 
   const job = await BackgroundJob.create({
     runKey: runId,
@@ -279,7 +305,7 @@ export async function startRun(actor, rawConfig = {}) {
     progressTimer: null
   };
 
-  loadTestCache = { value: true, checkedAt: Date.now() };
+  setActiveLoadTestStatus('running');
 
   activeRun.progressTimer = setInterval(() => {
     void syncJobProgress(activeRun);
@@ -303,6 +329,7 @@ export async function startRun(actor, rawConfig = {}) {
 }
 
 async function executeRun(run) {
+  const harness = await getLoadTestHarness();
   const baseUrl = getBaseUrl();
 
   if (run.config.scenario === 'feature-flags') {
@@ -319,7 +346,7 @@ async function executeRun(run) {
     };
 
     const updated = await updateFeatureFlag(MEDICINE_FEATURE_KEY, flagBody, { _id: run.startedBy.userId, role: 'admin' });
-    run.expectedFlag = buildExpectedFlagSummary(updated);
+    run.expectedFlag = harness.buildExpectedFlagSummary(updated);
   }
 
   run.phase = 'running';
@@ -339,7 +366,7 @@ async function executeRun(run) {
 
   let summary;
   if (run.config.scenario === 'spike') {
-    summary = await runSpikePlan({
+    summary = await harness.runSpikePlan({
       baselineVu: run.config.baselineVu,
       spikeVu: run.config.spikeVu,
       baselineSec: run.config.baselineSec,
@@ -348,7 +375,7 @@ async function executeRun(run) {
       ...common
     });
   } else {
-    summary = await runManagedPlan({
+    summary = await harness.runManagedPlan({
       vu: run.config.vu,
       durationSec: run.config.durationSec,
       rampUpSec: run.config.rampUpSec,
@@ -363,10 +390,11 @@ async function executeRun(run) {
   run.featureFlagResults = run.featureFlagTracker?.summarize() || null;
 
   const sinceMinutes = Math.max(5, Math.ceil(summary.window.durationSec / 60) + 2);
-  run.observability = await verifyObservability({
-    sinceMinutes,
-    sampleRequestIds: summary.sampleRequestIds || []
-  }).catch((err) => ({
+  run.observability = await harness
+    .verifyObservability({
+      sinceMinutes,
+      sampleRequestIds: summary.sampleRequestIds || []
+    }).catch((err) => ({
     total: 0,
     passed: 0,
     failed: 1,
@@ -393,12 +421,15 @@ async function executeRun(run) {
     ).catch(() => {});
   }
 
-  run.verdict = computeVerdict({
-    summary,
-    observability: run.observability,
-    featureFlags: run.featureFlagResults,
-    includeFailures: run.config.includeFailures
-  });
+  run.verdict = computeVerdict(
+    {
+      summary,
+      observability: run.observability,
+      featureFlags: run.featureFlagResults,
+      includeFailures: run.config.includeFailures
+    },
+    harness.evaluateHealth
+  );
 
   run.status = run.abortController.signal.aborted ? 'stopped' : 'completed';
   run.completedAt = new Date().toISOString();
@@ -445,7 +476,7 @@ async function finalizeRun(run) {
     activeRun = null;
   }
 
-  loadTestCache = { value: false, checkedAt: Date.now() };
+  setActiveLoadTestStatus(null);
 }
 
 export async function stopRun() {
@@ -455,6 +486,7 @@ export async function stopRun() {
 
   activeRun.abortController.abort();
   activeRun.status = 'stopping';
+  setActiveLoadTestStatus('stopping');
   await syncJobProgress(activeRun);
   return { id: activeRun.id, status: 'stopping' };
 }
