@@ -5,9 +5,12 @@ import express from 'express';
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 
-import { connectDatabase } from './config/database.js';
+import { connectDatabase, pingDatabase } from './config/database.js';
 import { config } from './config/env.js';
+import { createMongoRateLimitOptions } from './lib/mongo-rate-limit-store.js';
+import { metricsHandler } from './routes/metrics.routes.js';
 
 import authRoutes from './routes/auth.routes.js';
 import adminRoutes from './routes/admin.routes.js';
@@ -16,6 +19,8 @@ import doctorRoutes from './routes/doctor.routes.js';
 import patientRoutes from './routes/patient.routes.js';
 import appointmentRoutes from './routes/appointment.routes.js';
 import medicineRoutes from './routes/medicine.routes.js';
+import creditRoutes from './routes/credit.routes.js';
+import paymentRoutes from './routes/payment.routes.js';
 import mcpRoutes from './routes/mcp.routes.js';
 import oauthRoutes, {
   oauthApiRouter
@@ -28,6 +33,8 @@ import {
 
 import { errorMiddleware } from './middleware/error.middleware.js';
 import { requestLogMiddleware } from './middleware/request-log.middleware.js';
+import { csrfProtection } from './middleware/csrf.middleware.js';
+import { shouldSkipRateLimit } from './lib/rate-limit-policy.js';
 
 const app = express();
 
@@ -45,7 +52,22 @@ if (config.isProduction) {
 
 app.use(
   helmet({
-    contentSecurityPolicy: false,
+    contentSecurityPolicy: config.isProduction
+      ? {
+          directives: {
+            defaultSrc: ["'self'"],
+            baseUri: ["'self'"],
+            fontSrc: ["'self'"],
+            formAction: ["'self'"],
+            frameAncestors: ["'none'"],
+            imgSrc: ["'self'", 'data:', 'blob:'],
+            objectSrc: ["'none'"],
+            scriptSrc: ["'self'"],
+            styleSrc: ["'self'", "'unsafe-inline'"],
+            connectSrc: ["'self'"]
+          }
+        }
+      : false,
     crossOriginOpenerPolicy: false,
     crossOriginResourcePolicy: { policy: 'cross-origin' }
   })
@@ -124,7 +146,8 @@ app.use(
           'Authorization',
           'Accept',
           'Origin',
-          'X-Requested-With'
+          'X-Requested-With',
+          'X-CSRF-Token'
         ]
       });
     }
@@ -155,11 +178,89 @@ app.use(
 
 app.use(cookieParser());
 
+const apiLimiter = rateLimit({
+  ...createMongoRateLimitOptions({ windowMs: 15 * 60 * 1000, limit: 300 }),
+  skip: shouldSkipRateLimit
+});
+
+app.use('/api', apiLimiter);
+app.use(csrfProtection);
+
 /* -------------------------------------------------------------------------- */
 /* Request logging & correlation IDs                                          */
 /* -------------------------------------------------------------------------- */
 
 app.use(requestLogMiddleware);
+
+function isStaticAsset(pathname) {
+  return /\.(?:js|css|map|ico|png|jpg|jpeg|gif|svg|webp|woff2?|ttf)$/i.test(pathname);
+}
+
+function isLivenessRoute(pathname) {
+  return pathname === '/health/live' || pathname === '/api/health/live';
+}
+
+/* -------------------------------------------------------------------------- */
+/* Health Check Endpoints (before DB middleware)                              */
+/* -------------------------------------------------------------------------- */
+
+function livenessPayload() {
+  return {
+    ok: true,
+    service: config.mcpServerName,
+    version: config.mcpServerVersion,
+    environment: config.nodeEnv
+  };
+}
+
+app.get('/health/live', (_req, res) => {
+  res.status(200).json(livenessPayload());
+});
+
+app.get('/api/health/live', (_req, res) => {
+  res.status(200).json(livenessPayload());
+});
+
+app.get('/health', (_req, res) => {
+  res.status(200).json(livenessPayload());
+});
+
+app.get('/api/health', (_req, res) => {
+  res.status(200).json({
+    ok: true,
+    name: config.mcpServerName,
+    version: config.mcpServerVersion
+  });
+});
+
+app.get('/health/ready', async (_req, res) => {
+  try {
+    await connectDatabase();
+    const database = (await pingDatabase()) ? 'connected' : 'disconnected';
+    if (database !== 'connected') {
+      return res.status(503).json({ ok: false, database });
+    }
+    return res.status(200).json({ ok: true, database, environment: config.nodeEnv });
+  } catch {
+    return res.status(503).json({ ok: false, database: 'disconnected' });
+  }
+});
+
+app.get('/api/health/ready', async (_req, res) => {
+  try {
+    await connectDatabase();
+    const database = (await pingDatabase()) ? 'connected' : 'disconnected';
+    if (database !== 'connected') {
+      return res.status(503).json({ ok: false, database });
+    }
+    return res.status(200).json({ ok: true, database, environment: config.nodeEnv });
+  } catch {
+    return res.status(503).json({ ok: false, database: 'disconnected' });
+  }
+});
+
+app.get('/metrics', metricsHandler);
+app.get('/api/metrics', metricsHandler);
 
 /* -------------------------------------------------------------------------- */
 /* Database Middleware (Runs before all routes)                                */
@@ -167,13 +268,9 @@ app.use(requestLogMiddleware);
 
 app.use(async (req, _res, next) => {
   /*
-   * Bypass DB connection check for static assets.
+   * Bypass DB connection check for static assets and liveness probes.
    */
-  if (
-    /\.(?:js|css|map|ico|png|jpg|jpeg|gif|svg|webp|woff2?|ttf)$/i.test(
-      req.path
-    )
-  ) {
+  if (isStaticAsset(req.path) || isLivenessRoute(req.path)) {
     return next();
   }
 
@@ -183,27 +280,6 @@ app.use(async (req, _res, next) => {
   } catch (err) {
     next(err);
   }
-});
-
-/* -------------------------------------------------------------------------- */
-/* Health Check Endpoint                                                      */
-/* -------------------------------------------------------------------------- */
-
-app.get('/health', (_req, res) => {
-  res.status(200).json({
-    ok: true,
-    service: config.mcpServerName,
-    version: config.mcpServerVersion,
-    environment: config.nodeEnv
-  });
-});
-
-app.get('/api/health', (_req, res) => {
-  res.status(200).json({
-    ok: true,
-    name: config.mcpServerName,
-    version: config.mcpServerVersion
-  });
 });
 
 /* -------------------------------------------------------------------------- */
@@ -241,6 +317,8 @@ app.use('/api/doctors', doctorRoutes);
 app.use('/api/patients', patientRoutes);
 app.use('/api/appointments', appointmentRoutes);
 app.use('/api/medicines', medicineRoutes);
+app.use('/api/credits', creditRoutes);
+app.use('/api/payments', paymentRoutes);
 app.use('/api/oauth', oauthApiRouter);
 
 app.use('/oauth', oauthRoutes);

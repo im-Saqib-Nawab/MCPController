@@ -4,6 +4,7 @@ import { User } from '../models/User.js';
 import { Appointment } from '../models/Appointment.js';
 import { AppError } from '../middleware/error.middleware.js';
 import { isAdmin, isDoctor, isPatient } from '../lib/roles.js';
+import { paginateQuery } from '../lib/pagination.js';
 import {
   defaultWeeklyAvailability,
   normalizeWeeklyAvailability,
@@ -32,8 +33,11 @@ function assertCanMutateDoctor(actor, doctor) {
   throw new AppError(403, 'forbidden', 'You can only update your own doctor profile.');
 }
 
-export async function listDoctors() {
-  return Doctor.find().sort({ createdAt: -1 }).lean();
+export async function listDoctors(pagination = {}) {
+  return paginateQuery(Doctor, {}, {
+    sort: { createdAt: -1 },
+    pagination
+  });
 }
 
 export async function getDoctor(doctorId) {
@@ -220,12 +224,15 @@ export function serializeDoctorPublic(doctor, acceptedDates = new Set()) {
   });
 }
 
-export async function listDoctorsPublic() {
-  const doctors = await listDoctors();
+export async function listDoctorsPublic(pagination = {}) {
+  const { items: doctors, pagination: meta } = await listDoctors(pagination);
   const accepted = await acceptedDatesByDoctor(doctors.map((doctor) => doctor._id));
-  return doctors.map((doctor) =>
-    serializeDoctorPublic(doctor, accepted.get(String(doctor._id)) || new Set())
-  );
+  return {
+    doctors: doctors.map((doctor) =>
+      serializeDoctorPublic(doctor, accepted.get(String(doctor._id)) || new Set())
+    ),
+    pagination: meta
+  };
 }
 
 export async function getDoctorPublic(doctorId) {

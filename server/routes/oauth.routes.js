@@ -2,18 +2,12 @@ import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import * as oauthController from '../controllers/oauth.controller.js';
 import { requireUser, optionalUser } from '../middleware/auth.middleware.js';
+import { createMongoRateLimitOptions } from '../lib/mongo-rate-limit-store.js';
 
 const router = Router();
 
-/* -------------------------------------------------------------------------- */
-/* Rate limiting                                                              */
-/* -------------------------------------------------------------------------- */
-
 const oauthLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  limit: 100,
-  standardHeaders: true,
-  legacyHeaders: false,
+  ...createMongoRateLimitOptions({ windowMs: 15 * 60 * 1000, limit: 100 }),
   skip: () => process.env.NODE_ENV === 'test'
 });
 

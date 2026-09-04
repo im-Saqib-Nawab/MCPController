@@ -1,8 +1,11 @@
 import { config } from '../config/env.js';
 import { logger, serializeError } from '../lib/logger.js';
 import { getRequestContext } from '../lib/request-context.js';
+import { shouldPersistToDatabase } from '../lib/log-persist.js';
+import { enqueueLogEntry } from '../lib/log-queue.js';
 
 import { AppError } from '../middleware/error.middleware.js';
+import { buildPaginationMeta, parsePagination } from '../lib/pagination.js';
 import { ROLES } from '../lib/roles.js';
 
 let SystemLogModel;
@@ -41,11 +44,7 @@ function sanitizeMetadata(fields = {}) {
   return clean;
 }
 
-export async function persistLogEntry({ level, operation, message, fields = {} }) {
-  if (config.nodeEnv === 'test') {
-    return;
-  }
-
+function buildEntry({ level, operation, message, fields = {} }) {
   const ctx = getRequestContext();
   const metadata = sanitizeMetadata(fields);
   const err = metadata.err;
@@ -53,7 +52,7 @@ export async function persistLogEntry({ level, operation, message, fields = {} }
   delete metadata.err;
   delete metadata.operation;
 
-  const entry = {
+  return {
     level,
     operation,
     message: message || operation,
@@ -76,19 +75,18 @@ export async function persistLogEntry({ level, operation, message, fields = {} }
     errorStack: err?.stack,
     metadata: Object.keys(metadata).length ? metadata : undefined
   };
+}
 
-  try {
-    const SystemLog = await getModel();
-    await SystemLog.create(entry);
-  } catch (persistErr) {
-    logger.warn(
-      {
-        operation: 'log.persist.failed',
-        err: serializeError(persistErr)
-      },
-      'Failed to persist log entry'
-    );
+export async function persistLogEntry({ level, operation, message, fields = {} }) {
+  if (config.nodeEnv === 'test') {
+    return;
   }
+
+  if (!shouldPersistToDatabase({ level, operation, fields })) {
+    return;
+  }
+
+  enqueueLogEntry(buildEntry({ level, operation, message, fields }));
 }
 
 function assertAdmin(actor) {
@@ -213,11 +211,17 @@ export async function searchLogs(actor, filters = {}) {
 
   const SystemLog = await getModel();
   const query = buildLogQuery(filters);
-  const limit = Math.min(Math.max(Number(filters.limit) || 50, 1), 200);
+  const { page, limit, skip } = parsePagination(filters);
   const sortOrder = filters.requestId && !filters.operation ? 1 : -1;
 
-  const logs = await SystemLog.find(query).sort({ createdAt: sortOrder }).limit(limit).lean();
-  return logs.map(formatLog);
+  const findQuery = SystemLog.find(query).sort({ createdAt: sortOrder }).skip(skip).limit(limit);
+
+  const [total, logs] = await Promise.all([SystemLog.countDocuments(query), findQuery.lean()]);
+
+  return {
+    logs: logs.map(formatLog),
+    pagination: buildPaginationMeta({ page, limit, total })
+  };
 }
 
 export async function getLogById(actor, logId) {
@@ -229,3 +233,5 @@ export async function getLogById(actor, logId) {
   }
   return formatLog(log);
 }
+
+export { flushLogQueue } from '../lib/log-queue.js';

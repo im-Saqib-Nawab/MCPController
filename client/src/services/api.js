@@ -1,5 +1,14 @@
 import axios from 'axios';
 
+function readCsrfToken() {
+  if (typeof document === 'undefined') {
+    return null;
+  }
+
+  const match = document.cookie.match(/(?:^|;\s*)mcpcontroller_csrf=([^;]+)/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
 /*
  * The browser only talks to the public API paths.
  *
@@ -18,6 +27,17 @@ export const api = axios.create({
   headers: {
     Accept: 'application/json'
   }
+});
+
+api.interceptors.request.use((requestConfig) => {
+  const method = String(requestConfig.method || 'get').toLowerCase();
+  if (['post', 'put', 'patch', 'delete'].includes(method)) {
+    const csrfToken = readCsrfToken();
+    if (csrfToken) {
+      requestConfig.headers['X-CSRF-Token'] = csrfToken;
+    }
+  }
+  return requestConfig;
 });
 
 export function getErrorMessage(error) {

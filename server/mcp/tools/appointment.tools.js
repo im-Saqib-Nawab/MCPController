@@ -1,12 +1,14 @@
 import * as appointmentService from '../../services/appointment.service.js';
 import { assertToolAllowed } from '../../services/permission.service.js';
 import { getActor, liveScopes, toolResult } from '../actor.js';
+import { mcpListPayload } from '../list-result.js';
 
 export function listAppointmentsTool(authInfo) {
   return async (filters = {}) => {
     const actor = await getActor(authInfo);
     assertToolAllowed('list_appointments', liveScopes(authInfo, actor));
-    return toolResult(await appointmentService.listAppointments(actor, filters));
+    const result = await appointmentService.listAppointments(actor, filters);
+    return toolResult(mcpListPayload(result, 'appointments', filters));
   };
 }
 
@@ -78,7 +80,8 @@ export function listMyAppointmentsTool(authInfo) {
   return async (filters = {}) => {
     const actor = await getActor(authInfo);
     assertToolAllowed('list_my_appointments', liveScopes(authInfo, actor));
-    return toolResult(await appointmentService.listMyAppointments(actor, filters));
+    const result = await appointmentService.listMyAppointments(actor, filters);
+    return toolResult(mcpListPayload(result, 'appointments', filters));
   };
 }
 
@@ -86,7 +89,8 @@ export function listDoctorAppointmentRequestsTool(authInfo) {
   return async (filters = {}) => {
     const actor = await getActor(authInfo);
     assertToolAllowed('list_doctor_appointment_requests', liveScopes(authInfo, actor));
-    return toolResult(await appointmentService.listDoctorAppointmentRequests(actor, filters));
+    const result = await appointmentService.listDoctorAppointmentRequests(actor, filters);
+    return toolResult(mcpListPayload(result, 'appointments', filters));
   };
 }
 

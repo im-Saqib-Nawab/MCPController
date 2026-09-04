@@ -9,6 +9,49 @@ import {
   MEDICINE_FEATURE_KEY
 } from '../lib/medicines.js';
 import { isDoctorInPercentage } from '../lib/rollout.js';
+import { config } from '../config/env.js';
+
+const flagCache = new Map();
+
+async function readCachedFlag(key) {
+  if (config.isTest) {
+    let flag = await FeatureFlag.findOne({ key });
+    if (!flag) {
+      flag = await FeatureFlag.create({
+        ...FEATURE_FLAG_DEFAULTS,
+        key,
+        name: key === MEDICINE_FEATURE_KEY ? FEATURE_FLAG_DEFAULTS.name : key,
+        description: key === MEDICINE_FEATURE_KEY ? FEATURE_FLAG_DEFAULTS.description : ''
+      });
+    }
+    return flag;
+  }
+
+  const cached = flagCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.flag;
+  }
+
+  let flag = await FeatureFlag.findOne({ key });
+  if (!flag) {
+    flag = await FeatureFlag.create({
+      ...FEATURE_FLAG_DEFAULTS,
+      key,
+      name: key === MEDICINE_FEATURE_KEY ? FEATURE_FLAG_DEFAULTS.name : key,
+      description: key === MEDICINE_FEATURE_KEY ? FEATURE_FLAG_DEFAULTS.description : ''
+    });
+  }
+
+  flagCache.set(key, {
+    flag,
+    expiresAt: Date.now() + config.featureFlagCacheTtlMs
+  });
+  return flag;
+}
+
+function bustFlagCache(key = MEDICINE_FEATURE_KEY) {
+  flagCache.delete(key);
+}
 
 export function serializeFlag(flag) {
   return {
@@ -25,16 +68,7 @@ export function serializeFlag(flag) {
 }
 
 export async function getOrCreateFlag(key = MEDICINE_FEATURE_KEY) {
-  let flag = await FeatureFlag.findOne({ key });
-  if (flag) return flag;
-
-  flag = await FeatureFlag.create({
-    ...FEATURE_FLAG_DEFAULTS,
-    key,
-    name: key === MEDICINE_FEATURE_KEY ? FEATURE_FLAG_DEFAULTS.name : key,
-    description: key === MEDICINE_FEATURE_KEY ? FEATURE_FLAG_DEFAULTS.description : ''
-  });
-  return flag;
+  return readCachedFlag(key);
 }
 
 export function isDoctorIncluded(flag, doctorId) {
@@ -208,5 +242,6 @@ export async function updateFeatureFlag(key, fields, actor) {
   }
 
   await flag.save();
+  bustFlagCache(key);
   return serializeFlagForAdmin(flag);
 }

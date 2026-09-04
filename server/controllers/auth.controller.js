@@ -5,21 +5,27 @@ import {
   setSessionCookie,
   clearSessionCookie,
   serializeUserWithProfile,
-  updateOwnProfile
+  updateOwnProfile,
+  bumpSessionVersion
 } from '../services/auth.service.js';
+import { config } from '../config/env.js';
+import { setCsrfCookie, clearCsrfCookie } from '../middleware/csrf.middleware.js';
 import { AppError } from '../middleware/error.middleware.js';
 import { logError } from '../lib/request-context.js';
 import { logAudit } from '../lib/audit-log.js';
 
 const credentialsSchema = z.object({
   email: z.string().email(),
-  password: z.string().min(1, 'Password is required.')
+  password: z.string().min(1, 'Password is required.').max(config.passwordMaxLength)
 });
 
 const registerSchema = z.object({
   name: z.string().min(1, 'Name is required.'),
   email: z.string().email(),
-  password: z.string().min(8, 'Password must be at least 8 characters.'),
+  password: z
+    .string()
+    .min(8, 'Password must be at least 8 characters.')
+    .max(config.passwordMaxLength, `Password must be at most ${config.passwordMaxLength} characters.`),
   role: z.enum(['doctor', 'patient']).optional(),
   specialization: z.string().optional(),
   phone: z.string().optional(),
@@ -50,7 +56,8 @@ export async function register(req, res, next) {
   try {
     const parsed = parseOrThrow(registerSchema, req.body);
     const user = await registerUser(parsed);
-    setSessionCookie(res, user);
+    setSessionCookie(res, user, 0);
+    setCsrfCookie(res);
 
     logAudit(user, 'Register', { status: 'success', metadata: { email: user.email } });
 
@@ -65,8 +72,9 @@ export async function login(req, res, next) {
   req.auditAction = 'Login';
   try {
     const parsed = parseOrThrow(credentialsSchema, req.body);
-    const user = await loginUser(parsed);
-    setSessionCookie(res, user);
+    const { user, sessionVersion } = await loginUser(parsed);
+    setSessionCookie(res, user, sessionVersion);
+    setCsrfCookie(res);
 
     logAudit(user, 'Login', { status: 'success', metadata: { email: user.email } });
 
@@ -77,10 +85,14 @@ export async function login(req, res, next) {
   }
 }
 
-export function logout(req, res) {
-  logAudit(req.user, 'Logout', { status: 'success' });
+export async function logout(req, res) {
+  if (req.user?._id) {
+    await bumpSessionVersion(req.user._id);
+    logAudit(req.user, 'Logout', { status: 'success' });
+  }
 
   clearSessionCookie(res);
+  clearCsrfCookie(res);
   res.json({ ok: true });
 }
 

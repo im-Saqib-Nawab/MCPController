@@ -140,21 +140,36 @@ export async function rotateRefreshToken(rawRefreshToken) {
   }
 
   const refreshToken = rawRefreshToken.trim();
+  const refreshTokenHash = hashToken(refreshToken);
+  const now = new Date();
 
-  const record = await AccessToken.findOne({
-    refreshTokenHash: hashToken(refreshToken),
-    revoked: false
-  });
+  const record = await AccessToken.findOneAndUpdate(
+    {
+      refreshTokenHash,
+      revoked: false,
+      refreshExpiresAt: { $gt: now }
+    },
+    { $set: { revoked: true } },
+    { new: false }
+  );
 
   if (!record) {
+    const reused = await AccessToken.findOne({
+      refreshTokenHash,
+      revoked: true
+    }).lean();
+
+    if (reused?.userId && reused?.clientId) {
+      logOperation('warn', 'oauth.token.refresh.reuse_detected', {
+        userId: String(reused.userId),
+        clientId: reused.clientId
+      });
+      await revokeUserClientTokens(reused.userId, reused.clientId);
+    }
+
     return null;
   }
 
-  if (!record.refreshExpiresAt || record.refreshExpiresAt.getTime() <= Date.now()) {
-    return null;
-  }
-
-  // Record integrity validation
   if (!record.clientId || !record.userId || !record.resource) {
     return null;
   }
@@ -163,7 +178,6 @@ export async function rotateRefreshToken(rawRefreshToken) {
     return null;
   }
 
-  // Issue new token set prior to invalidating existing record
   const tokens = await issueTokens({
     userId: record.userId,
     clientId: record.clientId,
@@ -171,22 +185,23 @@ export async function rotateRefreshToken(rawRefreshToken) {
     resource: record.resource
   });
 
-  // Mark previous refresh token as consumed
-  record.revoked = true;
-  await record.save();
-
-  /*
-   * Attach clientId for internal validation in oauth.service.js 
-   * to guard against cross-client token exchange attacks.
-   */
   return {
     ...tokens,
     clientId: record.clientId
   };
 }
 
-export async function revokeUserTokens(userId) {
+export async function revokeUserTokens(userId, options = undefined) {
   if (!userId) return 0;
-  const result = await AccessToken.updateMany({ userId, revoked: false }, { revoked: true });
+  const result = await AccessToken.updateMany({ userId, revoked: false }, { revoked: true }, options);
+  return result.modifiedCount || 0;
+}
+
+export async function revokeUserClientTokens(userId, clientId) {
+  if (!userId || !clientId) return 0;
+  const result = await AccessToken.updateMany(
+    { userId, clientId, revoked: false },
+    { revoked: true }
+  );
   return result.modifiedCount || 0;
 }

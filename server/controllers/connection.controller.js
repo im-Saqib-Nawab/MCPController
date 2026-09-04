@@ -2,15 +2,22 @@ import { Connection } from '../models/Connection.js';
 import { AccessToken } from '../models/AccessToken.js';
 import { User } from '../models/User.js';
 import { logAudit } from '../lib/audit-log.js';
+import { paginateQuery } from '../lib/pagination.js';
 
 export async function listConnections(req, res, next) {
   try {
-    const connections = await Connection.find({ userId: req.user._id }).sort({ connectedAt: -1 }).lean();
+    const { items, pagination } = await paginateQuery(
+      Connection,
+      { userId: req.user._id },
+      { sort: { connectedAt: -1 }, pagination: req.query }
+    );
+
     res.json({
-      connections: connections.map((connection) => ({
+      connections: items.map((connection) => ({
         ...connection,
         authorizedAs: req.user.role
-      }))
+      })),
+      pagination
     });
   } catch (err) {
     next(err);
@@ -37,9 +44,14 @@ export async function revokeConnection(req, res, next) {
 
 export async function adminListConnections(req, res, next) {
   try {
-    const connections = await Connection.find().sort({ connectedAt: -1 }).lean();
+    const { items: connections, pagination } = await paginateQuery(
+      Connection,
+      {},
+      { sort: { connectedAt: -1 }, pagination: req.query }
+    );
+
     const userIds = [...new Set(connections.map((item) => String(item.userId)))];
-    const users = await User.find({ _id: { $in: userIds } }).lean();
+    const users = userIds.length ? await User.find({ _id: { $in: userIds } }).lean() : [];
     const usersById = new Map(users.map((user) => [String(user._id), user]));
 
     res.json({
@@ -57,7 +69,8 @@ export async function adminListConnections(req, res, next) {
             : null,
           authorizedAs: owner?.role || 'unknown'
         };
-      })
+      }),
+      pagination
     });
   } catch (err) {
     next(err);

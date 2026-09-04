@@ -65,5 +65,9 @@ const systemLogSchema = new mongoose.Schema(
 
 systemLogSchema.index({ createdAt: -1 });
 systemLogSchema.index({ createdAt: 1 }, { expireAfterSeconds: 60 * 60 * 24 * 30 });
+systemLogSchema.index({ level: 1, createdAt: -1 });
+systemLogSchema.index({ operation: 1, createdAt: -1 });
+systemLogSchema.index({ category: 1, createdAt: -1 });
+systemLogSchema.index({ requestId: 1, createdAt: 1 });
 
 export const SystemLog = mongoose.models.SystemLog || mongoose.model('SystemLog', systemLogSchema);

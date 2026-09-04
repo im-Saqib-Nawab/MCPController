@@ -22,6 +22,11 @@ export async function requireUser(req, res, next) {
       throw new AppError(401, 'authentication_required', 'Authentication required');
     }
 
+    const tokenSessionVersion = Number.isInteger(payload.sv) ? payload.sv : -1;
+    if (tokenSessionVersion !== (user.sessionVersion ?? 0)) {
+      throw new AppError(401, 'authentication_required', 'Authentication required');
+    }
+
     req.user = user;
     next();
   } catch (err) {
@@ -49,7 +54,19 @@ export async function optionalUser(req, res, next) {
 
     try {
       const payload = jwt.verify(token, config.jwtSecret);
-      req.user = await User.findById(payload.sub).lean();
+      const user = await User.findById(payload.sub).lean();
+      if (!user) {
+        req.user = null;
+        return next();
+      }
+
+      const tokenSessionVersion = Number.isInteger(payload.sv) ? payload.sv : -1;
+      if (tokenSessionVersion !== (user.sessionVersion ?? 0)) {
+        req.user = null;
+        return next();
+      }
+
+      req.user = user;
     } catch {
       req.user = null;
     }

@@ -51,7 +51,12 @@ export async function connectDatabase(uri = config.mongodbUri) {
   cache.uri = uri;
 
   cache.promise = mongoose.connect(uri, {
-    serverSelectionTimeoutMS: 10000
+    serverSelectionTimeoutMS: 10000,
+    maxPoolSize: config.mongodbMaxPoolSize,
+    minPoolSize: config.mongodbMinPoolSize,
+    maxIdleTimeMS: 30000,
+    socketTimeoutMS: 45000,
+    waitQueueTimeoutMS: config.mongodbWaitQueueTimeoutMS
   });
 
   try {
@@ -88,17 +93,74 @@ export async function connectDatabase(uri = config.mongodbUri) {
   }
 }
 
+export function isDatabaseConnected() {
+  return mongoose.connection.readyState === 1;
+}
+
+export async function pingDatabase() {
+  if (!isDatabaseConnected()) {
+    return false;
+  }
+
+  await mongoose.connection.db.admin().command({ ping: 1 });
+  return true;
+}
+
 async function syncCollectionIndexes() {
-  if (cache.indexesReady) return;
-  const { Doctor } = await import('../models/Doctor.js');
-  const { Appointment } = await import('../models/Appointment.js');
-  const { Medicine } = await import('../models/Medicine.js');
+  if (cache.indexesReady || !config.syncIndexesOnStartup) {
+    cache.indexesReady = true;
+    return;
+  }
+
+  const [
+    { Doctor },
+    { Appointment },
+    { Medicine },
+    { User },
+    { Connection },
+    { SystemLog },
+    { RateLimitCounter },
+    { BackgroundJob },
+    { CreditTransaction },
+    { Subscription },
+    { PaymentOrder },
+    { McpSessionContext }
+  ] = await Promise.all([
+    import('../models/Doctor.js'),
+    import('../models/Appointment.js'),
+    import('../models/Medicine.js'),
+    import('../models/User.js'),
+    import('../models/Connection.js'),
+    import('../models/SystemLog.js'),
+    import('../models/RateLimitCounter.js'),
+    import('../models/BackgroundJob.js'),
+    import('../models/CreditTransaction.js'),
+    import('../models/Subscription.js'),
+    import('../models/PaymentOrder.js'),
+    import('../models/McpSessionContext.js')
+  ]);
+
   try {
     await Doctor.collection.dropIndex('userId_1');
   } catch {
     // The previous unique userId index may not exist.
   }
-  await Promise.all([Doctor.syncIndexes(), Appointment.syncIndexes(), Medicine.syncIndexes()]);
+
+  await Promise.all([
+    Doctor.syncIndexes(),
+    Appointment.syncIndexes(),
+    Medicine.syncIndexes(),
+    User.syncIndexes(),
+    Connection.syncIndexes(),
+    SystemLog.syncIndexes(),
+    RateLimitCounter.syncIndexes(),
+    BackgroundJob.syncIndexes(),
+    CreditTransaction.syncIndexes(),
+    Subscription.syncIndexes(),
+    PaymentOrder.syncIndexes(),
+    McpSessionContext.syncIndexes()
+  ]);
+
   cache.indexesReady = true;
 }
 

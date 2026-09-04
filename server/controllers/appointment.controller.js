@@ -24,13 +24,15 @@ function requireUserScope(user, scope) {
 export async function listAppointments(req, res, next) {
   try {
     requireUserScope(req.user, 'appointment:read');
-    const appointments = await appointmentService.listAppointments(req.user, {
+    const result = await appointmentService.listAppointments(req.user, {
       status: req.query.status,
       doctorId: req.query.doctorId,
       patientId: req.query.patientId,
-      date: req.query.date
+      date: req.query.date,
+      page: req.query.page,
+      limit: req.query.limit
     });
-    res.json({ appointments });
+    res.json(result);
   } catch (err) {
     next(err);
   }

@@ -32,8 +32,9 @@ test('list doctors works', async () => {
     { name: 'Dr. Smith', specialization: 'Cardiology' },
     { name: 'Dr. Ali', specialization: 'Neurology' }
   ]);
-  const doctors = await doctorService.listDoctors();
+  const { items: doctors, pagination } = await doctorService.listDoctors();
   assert.equal(doctors.length, 2);
+  assert.equal(pagination.total, 2);
 });
 
 test('get doctor works', async () => {

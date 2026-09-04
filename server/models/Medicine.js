@@ -28,5 +28,6 @@ const medicineSchema = new mongoose.Schema(
 );
 
 medicineSchema.index({ name: 1, doctorId: 1 });
+medicineSchema.index({ doctorId: 1, category: 1, name: 1 });
 
 export const Medicine = mongoose.model('Medicine', medicineSchema);

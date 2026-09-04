@@ -1,9 +1,12 @@
 import { Router } from 'express';
+import rateLimit from 'express-rate-limit';
 import { createMcpHandler } from '@modelcontextprotocol/server';
 import { toNodeHandler } from '@modelcontextprotocol/node';
 import { requireMcpBearer } from '../mcp/auth.js';
 import { buildMcpServer } from '../mcp/server.js';
 import { logOperation } from '../lib/request-context.js';
+import { createMongoRateLimitOptions } from '../lib/mongo-rate-limit-store.js';
+import { shouldSkipRateLimit } from '../lib/rate-limit-policy.js';
 
 /**
  * Streamable HTTP at POST/GET/DELETE /mcp (current MCP transport).
@@ -18,7 +21,12 @@ const handler = createMcpHandler(
 const node = toNodeHandler(handler);
 const router = Router();
 
-router.all('/', requireMcpBearer, (req, res, next) => {
+const mcpLimiter = rateLimit({
+  ...createMongoRateLimitOptions({ windowMs: 15 * 60 * 1000, limit: 120 }),
+  skip: shouldSkipRateLimit
+});
+
+router.all('/', mcpLimiter, requireMcpBearer, (req, res, next) => {
   logOperation('info', 'mcp.request.received', {
     method: req.method,
     userId: req.auth?.extra?.userId,

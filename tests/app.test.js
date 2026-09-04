@@ -10,6 +10,7 @@ import { Doctor } from '../server/models/Doctor.js';
 import { hashToken } from '../server/services/token.service.js';
 import { config, mcpResourceUrl } from '../server/config/env.js';
 import { parseBasicAuthorization } from '../server/services/oauth.service.js';
+import { isAllowedRedirectUri } from '../server/lib/url-security.js';
 
 function pkce() {
   const verifier = crypto.randomBytes(32).toString('base64url');
@@ -28,6 +29,12 @@ function mcpPayload(res) {
 
 function toolText(payload) {
   return JSON.parse(payload.result.content[0].text);
+}
+
+/** Unwrap list tool responses that may include a credits envelope. */
+function toolData(payload) {
+  const parsed = toolText(payload);
+  return Array.isArray(parsed) ? parsed : parsed.data;
 }
 
 async function loginAdmin(agent) {
@@ -229,7 +236,7 @@ test('doctor tools honor read and write scopes and block delete without doctor:d
     .send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'list_doctors', arguments: {} } });
   assert.equal(listRes.status, 200);
   const listPayload = mcpPayload(listRes);
-  const listedDoctors = toolText(listPayload);
+  const listedDoctors = toolData(listPayload);
   assert.ok(Array.isArray(listedDoctors));
   assert.ok(listedDoctors.length >= 1);
 
@@ -530,10 +537,12 @@ test('MCP exposes the full tool catalog', async () => {
   assert.equal(listToolsRes.status, 200);
   const payload = mcpPayload(listToolsRes);
   const toolNames = payload.result.tools.map((tool) => tool.name).sort();
-  assert.equal(toolNames.length, 29);
+  assert.equal(toolNames.length, 35);
   assert.ok(toolNames.includes('request_appointment'));
   assert.ok(toolNames.includes('check_doctor_availability'));
   assert.ok(toolNames.includes('list_doctor_appointment_requests'));
+  assert.ok(toolNames.includes('get_credit_balance'));
+  assert.ok(toolNames.includes('explain_credits'));
   assert.ok(toolNames.includes('admin_update_appointment'));
 });
 
@@ -597,4 +606,94 @@ test('discovery documents are published', async () => {
   const rs = await request(app).get('/.well-known/oauth-protected-resource');
   assert.equal(rs.status, 200);
   assert.ok(rs.body.authorization_servers.length);
+});
+
+test('redirect URI policy rejects non-local HTTP callbacks', () => {
+  assert.equal(isAllowedRedirectUri('https://chatgpt.com/callback'), true);
+  assert.equal(isAllowedRedirectUri('http://localhost:9999/callback'), true);
+  assert.equal(isAllowedRedirectUri('http://evil.example/callback'), false);
+});
+
+test('logout invalidates the current session token', async () => {
+  const agent = request.agent(app);
+  await loginAdmin(agent);
+
+  const meBefore = await agent.get('/api/auth/me');
+  assert.equal(meBefore.status, 200);
+
+  const logout = await agent.post('/api/auth/logout');
+  assert.equal(logout.status, 200);
+
+  const meAfter = await agent.get('/api/auth/me');
+  assert.equal(meAfter.status, 401);
+});
+
+test('reused refresh token revokes the token family', async () => {
+  const client = await createClient('refresh-reuse-client');
+  const agent = request.agent(app);
+  await loginAdmin(agent);
+
+  const { verifier, challenge } = pkce();
+  const query = {
+    response_type: 'code',
+    client_id: client.clientId,
+    redirect_uri: client.redirectUris[0],
+    scope: 'doctor:read',
+    code_challenge: challenge,
+    code_challenge_method: 'S256',
+    resource: mcpResourceUrl()
+  };
+
+  const consent = await agent.post('/api/oauth/consent').send({
+    decision: 'allow',
+    scopes: ['doctor:read'],
+    query
+  });
+  const code = new URL(consent.body.redirectUrl).searchParams.get('code');
+
+  const tokenRes = await request(app).post('/oauth/token').type('form').send({
+    grant_type: 'authorization_code',
+    code,
+    redirect_uri: client.redirectUris[0],
+    client_id: client.clientId,
+    code_verifier: verifier,
+    resource: mcpResourceUrl()
+  });
+  assert.equal(tokenRes.status, 200);
+  const refreshToken = tokenRes.body.refresh_token;
+  assert.ok(refreshToken);
+
+  const rotated = await request(app).post('/oauth/token').type('form').send({
+    grant_type: 'refresh_token',
+    refresh_token: refreshToken,
+    client_id: client.clientId
+  });
+  assert.equal(rotated.status, 200);
+  const rotatedAccessToken = rotated.body.access_token;
+
+  const reused = await request(app).post('/oauth/token').type('form').send({
+    grant_type: 'refresh_token',
+    refresh_token: refreshToken,
+    client_id: client.clientId
+  });
+  assert.equal(reused.status, 400);
+
+  const mcpRes = await request(app)
+    .post('/mcp')
+    .set('Authorization', `Bearer ${rotatedAccessToken}`)
+    .set('Accept', 'application/json, text/event-stream')
+    .set('Content-Type', 'application/json')
+    .set('MCP-Protocol-Version', '2025-11-25')
+    .send({ jsonrpc: '2.0', id: 101, method: 'tools/list', params: {} });
+
+  assert.equal(mcpRes.status, 401);
+});
+
+test('dynamic client registration rejects insecure redirect URIs', async () => {
+  const response = await request(app).post('/oauth/register').send({
+    client_name: 'Unsafe Client',
+    redirect_uris: ['http://evil.example/callback']
+  });
+
+  assert.equal(response.status, 400);
 });

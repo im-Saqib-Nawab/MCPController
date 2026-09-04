@@ -12,6 +12,7 @@ import {
   listAllowedDoctorIds
 } from './featureFlag.service.js';
 import { getDoctorByUserId } from './doctor.service.js';
+import { paginateQuery } from '../lib/pagination.js';
 
 export function serializeMedicine(medicine, doctor = null) {
   return {
@@ -86,7 +87,7 @@ async function allowedDoctorFilter(actor) {
   throw new AppError(403, 'feature_disabled', 'Medicine & Health Tips is not available for your account.');
 }
 
-export async function listMedicines(actor, { doctorId } = {}) {
+export async function listMedicines(actor, { doctorId, ...pagination } = {}) {
   await assertCanViewMedicines(actor);
 
   const filter = (await allowedDoctorFilter(actor)) || {};
@@ -97,14 +98,23 @@ export async function listMedicines(actor, { doctorId } = {}) {
     filter.doctorId = new mongoose.Types.ObjectId(String(doctorId));
   }
 
-  const medicines = await Medicine.find(filter).sort({ category: 1, name: 1 }).lean();
+  const { items: medicines, pagination: meta } = await paginateQuery(Medicine, filter, {
+    sort: { category: 1, name: 1 },
+    pagination
+  });
+
   const doctorIds = [...new Set(medicines.map((item) => String(item.doctorId)))];
-  const doctors = await Doctor.find({ _id: { $in: doctorIds } }).lean();
+  const doctors = doctorIds.length
+    ? await Doctor.find({ _id: { $in: doctorIds } }).lean()
+    : [];
   const doctorMap = new Map(doctors.map((doctor) => [String(doctor._id), doctor]));
 
-  return medicines.map((medicine) =>
-    serializeMedicine(medicine, doctorMap.get(String(medicine.doctorId)) || null)
-  );
+  return {
+    medicines: medicines.map((medicine) =>
+      serializeMedicine(medicine, doctorMap.get(String(medicine.doctorId)) || null)
+    ),
+    pagination: meta
+  };
 }
 
 export async function getMedicine(medicineId, actor) {

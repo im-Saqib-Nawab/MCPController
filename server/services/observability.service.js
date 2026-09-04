@@ -2,6 +2,8 @@ import mongoose from 'mongoose';
 
 import { config } from '../config/env.js';
 import { MCP_ACTION_LABELS } from '../lib/audit-log.js';
+import { buildPaginationMeta, parsePagination } from '../lib/pagination.js';
+import { getHttpRuntimeMetrics, getRuntimeMetricsSnapshot } from '../lib/runtime-metrics.js';
 import { getLogById, searchLogs } from './log-store.service.js';
 
 const APP_STARTED_AT = Date.now();
@@ -127,9 +129,9 @@ export async function fetchLog(user, logId) {
 export async function listTraces(user, filters = {}) {
   const SystemLog = await getModel();
   const match = traceMatch(filters);
-  const limit = Math.min(Math.max(Number(filters.limit) || 50, 1), 200);
+  const { page, limit, skip } = parsePagination(filters);
 
-  const traces = await SystemLog.aggregate([
+  const pipeline = [
     { $match: match },
     { $sort: { createdAt: 1 } },
     {
@@ -202,11 +204,19 @@ export async function listTraces(user, filters = {}) {
     },
     ...(filters.status ? [{ $match: { status: String(filters.status) } }] : []),
     ...(filters.minDurationMs ? [{ $match: { durationMs: { $gte: Number(filters.minDurationMs) } } }] : []),
-    { $sort: { startTime: -1 } },
-    { $limit: limit }
+    { $sort: { startTime: -1 } }
+  ];
+
+  const countPipeline = [...pipeline, { $count: 'total' }];
+  const dataPipeline = [...pipeline, { $skip: skip }, { $limit: limit }];
+
+  const [countRows, traces] = await Promise.all([
+    SystemLog.aggregate(countPipeline),
+    SystemLog.aggregate(dataPipeline)
   ]);
 
-  return traces.map((trace) => ({
+  const total = countRows[0]?.total || 0;
+  const rows = traces.map((trace) => ({
     traceId: trace._id,
     timestamp: trace.startTime,
     endTime: trace.endTime,
@@ -225,10 +235,15 @@ export async function listTraces(user, filters = {}) {
     stepCount: trace.stepCount,
     steps: trace.operations
   }));
+
+  return {
+    traces: rows,
+    pagination: buildPaginationMeta({ page, limit, total })
+  };
 }
 
 export async function getTrace(user, requestId) {
-  const logs = await searchLogs(actorFromUser(user), {
+  const { logs } = await searchLogs(actorFromUser(user), {
     requestId,
     limit: 200,
     includeTechnical: true,
@@ -289,10 +304,7 @@ export async function getMetrics(_user, filters = {}) {
     auditFailed,
     auditByAction,
     auditByRole,
-    httpCompleted,
-    httpErrors,
     mcpTools,
-    dbOps,
     recentAuditErrors
   ] = await Promise.all([
     SystemLog.countDocuments(auditMatch),
@@ -309,15 +321,6 @@ export async function getMetrics(_user, filters = {}) {
       { $group: { _id: '$role', count: { $sum: 1 } } },
       { $sort: { count: -1 } }
     ]),
-    SystemLog.countDocuments({
-      operation: 'http.request.completed',
-      createdAt: { $gte: since }
-    }),
-    SystemLog.countDocuments({
-      operation: 'http.request.completed',
-      createdAt: { $gte: since },
-      $or: [{ level: 'error' }, { statusCode: { $gte: 400 } }]
-    }),
     SystemLog.aggregate([
       {
         $match: {
@@ -337,26 +340,14 @@ export async function getMetrics(_user, filters = {}) {
       { $sort: { calls: -1 } },
       { $limit: 10 }
     ]),
-    SystemLog.countDocuments({
-      operation: { $regex: /^db\./ },
-      createdAt: { $gte: since }
-    }),
     SystemLog.find({ ...auditMatch, status: 'error' })
       .sort({ createdAt: -1 })
       .limit(5)
       .lean()
   ]);
 
-  const avgDuration = await SystemLog.aggregate([
-    {
-      $match: {
-        operation: 'http.request.completed',
-        createdAt: { $gte: since },
-        durationMs: { $type: 'number' }
-      }
-    },
-    { $group: { _id: null, avgDurationMs: { $avg: '$durationMs' } } }
-  ]);
+  const httpMetrics = getHttpRuntimeMetrics();
+  const runtime = getRuntimeMetricsSnapshot();
 
   const auditAvgDuration = await SystemLog.aggregate([
     {
@@ -400,11 +391,14 @@ export async function getMetrics(_user, filters = {}) {
       }))
     },
     http: {
-      total: httpCompleted,
-      failed: httpErrors,
-      successful: httpCompleted - httpErrors,
-      errorRate: httpCompleted ? Number(((httpErrors / httpCompleted) * 100).toFixed(1)) : 0,
-      averageResponseMs: Math.round(avgDuration[0]?.avgDurationMs || 0)
+      total: httpMetrics.total,
+      failed: httpMetrics.failed,
+      successful: httpMetrics.successful,
+      errorRate: httpMetrics.errorRate,
+      averageResponseMs: httpMetrics.averageResponseMs,
+      p95ResponseMs: httpMetrics.p95ResponseMs,
+      slowRequests: httpMetrics.slowRequests,
+      topRoutes: httpMetrics.topRoutes
     },
     mcp: {
       toolCalls: mcpTools.reduce((sum, row) => sum + row.calls, 0),
@@ -416,10 +410,12 @@ export async function getMetrics(_user, filters = {}) {
       }))
     },
     database: {
-      operations: dbOps,
       connected: dbConnected,
-      state: dbConnected ? 'connected' : 'disconnected'
+      state: dbConnected ? 'connected' : 'disconnected',
+      logQueueDepth: runtime.logQueueDepth,
+      logPersistFailures: runtime.counters.log_persist_failed_total || 0
     },
+    runtime,
     health: {
       ok: dbConnected,
       uptimeMs,
@@ -430,13 +426,17 @@ export async function getMetrics(_user, filters = {}) {
 }
 
 export async function getOverview(user, filters = {}) {
-  const [metrics, logs, traces] = await Promise.all([
+  const [metrics, logsResult, tracesResult] = await Promise.all([
     getMetrics(user, filters),
     listLogs(user, { ...filters, limit: 10 }),
     listTraces(user, { ...filters, limit: 10 })
   ]);
 
-  return { metrics, logs, traces };
+  return {
+    metrics,
+    logs: logsResult.logs,
+    traces: tracesResult.traces
+  };
 }
 
 export async function getFilterOptions() {

@@ -6,6 +6,7 @@ function parseFilters(query = {}) {
     sinceMinutes: query.sinceMinutes ? Number(query.sinceMinutes) : undefined,
     since: query.since,
     until: query.until,
+    page: query.page,
     limit: query.limit ? Number(query.limit) : undefined,
     level: query.level,
     operation: query.operation,
@@ -41,7 +42,12 @@ export async function metrics(req, res, next) {
 
 export async function logs(req, res, next) {
   try {
-    res.json({ logs: await observabilityService.listLogs(req.user, parseFilters(req.query)) });
+    const result = await observabilityService.listLogs(req.user, parseFilters(req.query));
+    if (Array.isArray(result)) {
+      res.json({ logs: result });
+      return;
+    }
+    res.json(result);
   } catch (err) {
     next(err);
   }
@@ -57,7 +63,12 @@ export async function logDetail(req, res, next) {
 
 export async function traces(req, res, next) {
   try {
-    res.json({ traces: await observabilityService.listTraces(req.user, parseFilters(req.query)) });
+    const result = await observabilityService.listTraces(req.user, parseFilters(req.query));
+    if (Array.isArray(result)) {
+      res.json({ traces: result });
+      return;
+    }
+    res.json(result);
   } catch (err) {
     next(err);
   }

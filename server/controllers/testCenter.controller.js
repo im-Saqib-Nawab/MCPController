@@ -11,7 +11,7 @@ export async function config(req, res, next) {
 
 export async function status(req, res, next) {
   try {
-    res.json(testCenterService.getStatus());
+    res.json(await testCenterService.getStatus());
   } catch (err) {
     next(err);
   }
@@ -28,7 +28,7 @@ export async function start(req, res, next) {
 
 export async function stop(req, res, next) {
   try {
-    const result = testCenterService.stopRun();
+    const result = await testCenterService.stopRun();
     res.json(result);
   } catch (err) {
     next(err);
@@ -37,7 +37,7 @@ export async function stop(req, res, next) {
 
 export async function runs(req, res, next) {
   try {
-    res.json({ runs: testCenterService.listRuns() });
+    res.json({ runs: await testCenterService.listRuns() });
   } catch (err) {
     next(err);
   }
@@ -45,7 +45,7 @@ export async function runs(req, res, next) {
 
 export async function runDetail(req, res, next) {
   try {
-    res.json({ run: testCenterService.getRun(req.params.runId) });
+    res.json({ run: await testCenterService.getRun(req.params.runId) });
   } catch (err) {
     next(err);
   }

@@ -15,6 +15,11 @@ import Authorize from './pages/Authorize.jsx';
 import Success from './pages/Success.jsx';
 import Observability from './pages/Observability.jsx';
 import TestingCenter from './pages/TestingCenter.jsx';
+import Credits from './pages/Credits.jsx';
+import CreditHistory from './pages/CreditHistory.jsx';
+import Plans from './pages/Plans.jsx';
+import PurchaseSuccess from './pages/PurchaseSuccess.jsx';
+import AdminCreditsPage from './pages/AdminCreditsPage.jsx';
 import { api } from './services/api.js';
 
 export default function App() {
@@ -105,6 +110,46 @@ export default function App() {
           element={
             <AdminRoute user={user} loading={loading}>
               <Observability />
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="/credits"
+          element={
+            <ProtectedRoute user={user} loading={loading}>
+              <Credits />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/credits/history"
+          element={
+            <ProtectedRoute user={user} loading={loading}>
+              <CreditHistory />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/plans"
+          element={
+            <ProtectedRoute user={user} loading={loading}>
+              <Plans />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/purchase/success"
+          element={
+            <ProtectedRoute user={user} loading={loading}>
+              <PurchaseSuccess />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/admin/credits"
+          element={
+            <AdminRoute user={user} loading={loading}>
+              <AdminCreditsPage />
             </AdminRoute>
           }
         />

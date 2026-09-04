@@ -7,6 +7,8 @@ import { defaultScopesForRole } from './permission.service.js';
 import { serializeUser } from './auth.service.js';
 import { getDoctorByUserId } from './doctor.service.js';
 import { config } from '../config/env.js';
+import { paginateQuery } from '../lib/pagination.js';
+import { withOptionalTransaction } from '../lib/transactions.js';
 
 function assertPatientId(patientId) {
   if (!mongoose.isValidObjectId(patientId)) {
@@ -22,20 +24,39 @@ function serializePatient(user) {
   return serializeUser(user);
 }
 
-export async function listPatients(actor) {
+export async function listPatients(actor, pagination = {}) {
   if (isAdmin(actor)) {
-    const users = await User.find({ role: { $in: ['patient', 'user'] } }).sort({ createdAt: -1 }).lean();
-    return users.map(serializePatient);
+    const { items, pagination: meta } = await paginateQuery(
+      User,
+      { role: { $in: ['patient', 'user'] } },
+      { sort: { createdAt: -1 }, pagination }
+    );
+    return {
+      patients: items.map(serializePatient),
+      pagination: meta
+    };
   }
 
   if (isDoctor(actor)) {
     const doctor = await getDoctorByUserId(userId(actor));
-    if (!doctor) return [];
-    const rows = await Appointment.find({ doctorId: doctor._id }).select('patientId').lean();
-    const ids = [...new Set(rows.map((row) => String(row.patientId)))];
-    if (!ids.length) return [];
-    const users = await User.find({ _id: { $in: ids } }).sort({ name: 1 }).lean();
-    return users.map(serializePatient);
+    if (!doctor) {
+      return { patients: [], pagination: { page: 1, limit: 0, total: 0, totalPages: 1, hasMore: false } };
+    }
+
+    const ids = await Appointment.distinct('patientId', { doctorId: doctor._id });
+    if (!ids.length) {
+      return { patients: [], pagination: { page: 1, limit: 0, total: 0, totalPages: 1, hasMore: false } };
+    }
+
+    const { items, pagination: meta } = await paginateQuery(
+      User,
+      { _id: { $in: ids } },
+      { sort: { name: 1 }, pagination }
+    );
+    return {
+      patients: items.map(serializePatient),
+      pagination: meta
+    };
   }
 
   throw new AppError(403, 'forbidden', 'You cannot list patients.');
@@ -134,10 +155,14 @@ export async function deletePatient(patientId, actor) {
     throw new AppError(404, 'not_found', 'Patient not found.');
   }
 
-  await Appointment.updateMany(
-    { patientId: user._id, status: { $in: ['REQUESTED', 'ACCEPTED', 'ALTERNATIVE_OFFERED', 'RESCHEDULED'] } },
-    { status: 'CANCELLED', rejectionReason: 'Patient account was removed.' }
-  );
-  await user.deleteOne();
+  await withOptionalTransaction(async (session) => {
+    const options = session ? { session } : undefined;
+    await Appointment.updateMany(
+      { patientId: user._id, status: { $in: ['REQUESTED', 'ACCEPTED', 'ALTERNATIVE_OFFERED', 'RESCHEDULED'] } },
+      { status: 'CANCELLED', rejectionReason: 'Patient account was removed.' },
+      options
+    );
+    await user.deleteOne(options);
+  });
   return { deleted: true, patientId: String(user._id) };
 }

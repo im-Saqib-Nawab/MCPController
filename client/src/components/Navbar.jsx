@@ -1,5 +1,6 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../services/api.js';
+import CreditBalanceCard from './CreditBalanceCard.jsx';
 
 export default function Navbar({ user, onLogout }) {
   const navigate = useNavigate();
@@ -26,6 +27,18 @@ export default function Navbar({ user, onLogout }) {
               <Link to="/dashboard" className="text-slate-600 hover:text-slate-900">
                 Dashboard
               </Link>
+              {user.role !== 'admin' ? (
+                <>
+                  <Link to="/credits" className="text-slate-600 hover:text-slate-900">
+                    Credits
+                  </Link>
+                  <CreditBalanceCard balance={user.creditBalance ?? 0} compact />
+                </>
+              ) : (
+                <Link to="/admin/credits" className="text-slate-600 hover:text-slate-900">
+                  Credits Admin
+                </Link>
+              )}
               {user.role === 'admin' ? (
                 <>
                   <Link to="/admin/testing" className="text-slate-600 hover:text-slate-900">

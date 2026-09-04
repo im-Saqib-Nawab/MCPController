@@ -14,8 +14,8 @@ import { DOCTOR_ACCESS_MODES } from '../lib/medicines.js';
 
 export async function listAllUsers(req, res, next) {
   try {
-    const users = await listUsers();
-    res.json({ users });
+    const result = await listUsers(req.query);
+    res.json(result);
   } catch (err) {
     next(err);
   }

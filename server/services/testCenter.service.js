@@ -1,7 +1,9 @@
 import crypto from 'node:crypto';
+import os from 'node:os';
 
 import { config } from '../config/env.js';
 import { AppError } from '../middleware/error.middleware.js';
+import { BackgroundJob } from '../models/BackgroundJob.js';
 import { evaluateHealth } from '../../load-tests/lib/report.js';
 import { MetricsCollector } from '../../load-tests/lib/metrics.js';
 import { runManagedPlan, runSpikePlan } from '../../load-tests/lib/runner.js';
@@ -16,9 +18,12 @@ import {
 import { MEDICINE_FEATURE_KEY } from '../lib/medicines.js';
 import * as observabilityService from './observability.service.js';
 
+const JOB_TYPE = 'load-test';
+const INSTANCE_ID = `${os.hostname()}-${process.pid}`;
 const onServerless = Boolean(process.env.VERCEL);
 const MAX_VU = Number(process.env.TEST_CENTER_MAX_VU) || (onServerless ? 20 : 500);
 const MAX_DURATION_SEC = Number(process.env.TEST_CENTER_MAX_DURATION_SEC) || (onServerless ? 45 : 3600);
+const HISTORY_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 const SCENARIOS = {
   normal: {
@@ -73,12 +78,31 @@ const SCENARIOS = {
 };
 
 let activeRun = null;
-const history = [];
+let loadTestCache = { value: false, checkedAt: 0 };
 
-/** True while the Testing Center is driving load-test logins (relaxes auth rate limits). */
-export function isLoadTestRunning() {
-  if (!activeRun) return false;
-  return ['running', 'starting', 'stopping'].includes(activeRun.status);
+async function hasActiveJobInDatabase() {
+  const job = await BackgroundJob.findOne({
+    type: JOB_TYPE,
+    status: { $in: ['running', 'starting', 'stopping'] }
+  })
+    .select('_id')
+    .lean();
+  return Boolean(job);
+}
+
+/** True while the Testing Center is driving load-test traffic (dev-only rate-limit bypass). */
+export async function isLoadTestRunning() {
+  if (activeRun) {
+    return ['running', 'starting', 'stopping'].includes(activeRun.status);
+  }
+
+  if (Date.now() - loadTestCache.checkedAt < 5000) {
+    return loadTestCache.value;
+  }
+
+  const value = await hasActiveJobInDatabase();
+  loadTestCache = { value, checkedAt: Date.now() };
+  return value;
 }
 
 function createRunId() {
@@ -139,9 +163,26 @@ function computeVerdict({ summary, observability, featureFlags, includeFailures 
   return { status, issues, healthy: health.healthy };
 }
 
+async function syncJobProgress(run, extra = {}) {
+  if (!run.jobId) return;
+
+  await BackgroundJob.findByIdAndUpdate(run.jobId, {
+    status: run.status,
+    phase: run.phase || null,
+    progress: {
+      live: run.metrics.snapshot(),
+      timeSeries: run.metrics.getTimeSeries(),
+      recentRequests: run.metrics.getRecentRequests(80),
+      featureFlags: run.featureFlagTracker?.summarize() || null,
+      expectedFlag: run.expectedFlag || null,
+      ...extra
+    }
+  });
+}
+
 export function getConfig() {
   return {
-    enabled: true,
+    enabled: config.testCenterEnabled,
     baseUrl: getBaseUrl(),
     limits: {
       maxVu: MAX_VU,
@@ -156,7 +197,9 @@ export function getConfig() {
   };
 }
 
-export function getStatus() {
+export async function getStatus() {
+  const history = await listRuns();
+
   return {
     active: activeRun
       ? {
@@ -174,13 +217,25 @@ export function getStatus() {
           phase: activeRun.phase || null
         }
       : null,
-    history: history.slice(0, 20)
+    history
   };
 }
 
 export async function startRun(actor, rawConfig = {}) {
+  if (!config.testCenterEnabled) {
+    throw new AppError(
+      403,
+      'forbidden',
+      'Testing Center load runs are disabled in this environment. Set TEST_CENTER_ENABLED=true to enable them.'
+    );
+  }
+
   if (activeRun && activeRun.status === 'running') {
     throw new AppError(409, 'conflict', 'A test run is already in progress.');
+  }
+
+  if (await hasActiveJobInDatabase()) {
+    throw new AppError(409, 'conflict', 'A test run is already in progress on another instance.');
   }
 
   const runConfig = clampConfig(rawConfig);
@@ -188,10 +243,25 @@ export async function startRun(actor, rawConfig = {}) {
   const abortController = new AbortController();
   const metrics = new MetricsCollector();
   const featureFlagTracker = runConfig.scenario === 'feature-flags' ? createFeatureFlagTracker() : null;
-  let expectedFlag = null;
+
+  const job = await BackgroundJob.create({
+    runKey: runId,
+    type: JOB_TYPE,
+    status: 'running',
+    startedBy: {
+      userId: String(actor._id),
+      name: actor.name,
+      email: actor.email
+    },
+    instanceId: INSTANCE_ID,
+    config: runConfig,
+    phase: 'starting',
+    expiresAt: new Date(Date.now() + HISTORY_TTL_MS)
+  });
 
   activeRun = {
     id: runId,
+    jobId: job._id,
     status: 'running',
     startedAt: new Date().toISOString(),
     startedBy: {
@@ -205,15 +275,24 @@ export async function startRun(actor, rawConfig = {}) {
     expectedFlag: null,
     previousFlagState: null,
     abortController,
-    phase: 'starting'
+    phase: 'starting',
+    progressTimer: null
   };
 
-  executeRun(activeRun).catch((err) => {
-    if (activeRun?.id === runId) {
-      activeRun.status = 'failed';
-      activeRun.error = err.message;
-      finalizeRun(activeRun);
-    }
+  loadTestCache = { value: true, checkedAt: Date.now() };
+
+  activeRun.progressTimer = setInterval(() => {
+    void syncJobProgress(activeRun);
+  }, 5000);
+
+  setImmediate(() => {
+    executeRun(activeRun).catch((err) => {
+      if (activeRun?.id === runId) {
+        activeRun.status = 'failed';
+        activeRun.error = err.message;
+        finalizeRun(activeRun);
+      }
+    });
   });
 
   return {
@@ -228,6 +307,7 @@ async function executeRun(run) {
 
   if (run.config.scenario === 'feature-flags') {
     run.phase = 'configuring-feature-flag';
+    await syncJobProgress(run);
     run.previousFlagState = serializeFlag(await getFeatureFlag(MEDICINE_FEATURE_KEY));
 
     const flagBody = {
@@ -243,6 +323,7 @@ async function executeRun(run) {
   }
 
   run.phase = 'running';
+  await syncJobProgress(run);
 
   const common = {
     signal: run.abortController.signal,
@@ -277,6 +358,7 @@ async function executeRun(run) {
   }
 
   run.phase = 'verifying';
+  await syncJobProgress(run);
   run.summary = summary;
   run.featureFlagResults = run.featureFlagTracker?.summarize() || null;
 
@@ -323,7 +405,12 @@ async function executeRun(run) {
   finalizeRun(run);
 }
 
-function finalizeRun(run) {
+async function finalizeRun(run) {
+  if (run.progressTimer) {
+    clearInterval(run.progressTimer);
+    run.progressTimer = null;
+  }
+
   const record = {
     id: run.id,
     status: run.status,
@@ -343,25 +430,36 @@ function finalizeRun(run) {
     error: run.error || null
   };
 
-  history.unshift(record);
-  if (history.length > 20) history.pop();
+  if (run.jobId) {
+    await BackgroundJob.findByIdAndUpdate(run.jobId, {
+      status: run.status,
+      phase: run.phase || null,
+      completedAt: new Date(record.completedAt),
+      result: record,
+      error: run.error || '',
+      expiresAt: new Date(Date.now() + HISTORY_TTL_MS)
+    });
+  }
 
   if (activeRun?.id === run.id) {
     activeRun = null;
   }
+
+  loadTestCache = { value: false, checkedAt: Date.now() };
 }
 
-export function stopRun() {
+export async function stopRun() {
   if (!activeRun || activeRun.status !== 'running') {
     throw new AppError(404, 'not_found', 'No active test run.');
   }
 
   activeRun.abortController.abort();
   activeRun.status = 'stopping';
+  await syncJobProgress(activeRun);
   return { id: activeRun.id, status: 'stopping' };
 }
 
-export function getRun(runId) {
+export async function getRun(runId) {
   if (activeRun?.id === runId) {
     return {
       id: activeRun.id,
@@ -381,13 +479,31 @@ export function getRun(runId) {
     };
   }
 
-  const found = history.find((run) => run.id === runId);
-  if (!found) {
+  const job = await BackgroundJob.findOne({ runKey: runId, type: JOB_TYPE }).lean();
+  if (!job) {
     throw new AppError(404, 'not_found', 'Test run not found.');
   }
-  return found;
+
+  if (job.result) {
+    return job.result;
+  }
+
+  return {
+    id: String(job.runKey),
+    status: job.status,
+    scenario: job.config?.scenario,
+    startedAt: job.startedAt,
+    config: job.config,
+    progress: job.progress || null,
+    error: job.error || null
+  };
 }
 
-export function listRuns() {
-  return history;
+export async function listRuns() {
+  const jobs = await BackgroundJob.find({ type: JOB_TYPE, result: { $ne: null } })
+    .sort({ createdAt: -1 })
+    .limit(20)
+    .lean();
+
+  return jobs.map((job) => job.result);
 }

@@ -5,6 +5,7 @@ import MedicineManager from '../components/MedicineManager.jsx';
 import { WeeklyEditor } from '../components/AvailabilityGrid.jsx';
 import { STATUS_META, weekdayLabel } from '../lib/status.js';
 import { api, getErrorMessage } from '../services/api.js';
+import CreditBalanceCard from '../components/CreditBalanceCard.jsx';
 
 export default function DoctorDashboard({ user }) {
   const [doctor, setDoctor] = useState(null);
@@ -91,6 +92,13 @@ export default function DoctorDashboard({ user }) {
 
       {error ? <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
       {success ? <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{success}</div> : null}
+
+      <div className="mt-6">
+        <CreditBalanceCard
+          balance={user.creditBalance ?? 0}
+          subscription={user.subscription}
+        />
+      </div>
 
       <section className="mt-8 rounded-xl border border-slate-200 bg-white p-5">
         <h2 className="font-semibold text-slate-900">Weekly availability</h2>

@@ -1,12 +1,14 @@
 import * as patientService from '../../services/patient.service.js';
 import { assertToolAllowed } from '../../services/permission.service.js';
 import { getActor, liveScopes, toolResult } from '../actor.js';
+import { mcpListPayload } from '../list-result.js';
 
 export function listPatientsTool(authInfo) {
-  return async () => {
+  return async (filters = {}) => {
     const actor = await getActor(authInfo);
     assertToolAllowed('list_patients', liveScopes(authInfo, actor));
-    return toolResult(await patientService.listPatients(actor));
+    const result = await patientService.listPatients(actor, filters);
+    return toolResult(mcpListPayload(result, 'patients', filters));
   };
 }
 

@@ -13,5 +13,7 @@ const connectionSchema = new mongoose.Schema({
 });
 
 connectionSchema.index({ userId: 1, clientId: 1 }, { unique: true });
+connectionSchema.index({ userId: 1, connectedAt: -1 });
+connectionSchema.index({ connectedAt: -1 });
 
 export const Connection = mongoose.model('Connection', connectionSchema);

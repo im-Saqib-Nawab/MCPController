@@ -7,7 +7,7 @@
     "dev": "node --watch index.js",
     "start": "node index.js",
     "seed": "node seed/seed.js",
-    "test": "node --test --test-concurrency=1 --test-timeout=60000 ../tests/permissions.test.js ../tests/doctor.test.js ../tests/appointment.test.js ../tests/featureFlag.test.js ../tests/medicine.test.js ../tests/mcp-flow.test.js ../tests/app.test.js ../tests/observability.test.js"
+    "test": "node --test --test-concurrency=1 --test-timeout=60000 ../tests/permissions.test.js ../tests/doctor.test.js ../tests/appointment.test.js ../tests/featureFlag.test.js ../tests/medicine.test.js ../tests/mcp-flow.test.js ../tests/app.test.js ../tests/observability.test.js ../tests/reliability.test.js ../tests/credits.test.js"
   },
   "dependencies": {
     "@modelcontextprotocol/node": "^2.0.0",
@@ -22,6 +22,7 @@
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.18.0",
     "pino": "^9.9.0",
+    "@sentry/node": "^9.46.0",
     "pino-pretty": "^13.1.1",
     "zod": "^4.0.0"
   },

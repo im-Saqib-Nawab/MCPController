@@ -13,6 +13,8 @@ import {
   normalizeWeeklyAvailability
 } from '../lib/availability.js';
 import { getDoctorByUserId, serializeDoctor } from './doctor.service.js';
+import { paginateQuery } from '../lib/pagination.js';
+import { withOptionalTransaction } from '../lib/transactions.js';
 
 function assertId(id, label) {
   if (!mongoose.isValidObjectId(id)) {
@@ -50,11 +52,9 @@ export async function suggestAvailableDates(doctorId, excludeDate, limit = 3) {
   }).slice(0, limit);
 }
 
-async function serializeAppointment(appointment) {
-  const [patient, doctor] = await Promise.all([
-    User.findById(appointment.patientId).lean(),
-    Doctor.findById(appointment.doctorId).lean()
-  ]);
+function serializeAppointmentRow(appointment, patientMap, doctorMap) {
+  const patient = patientMap.get(String(appointment.patientId)) || null;
+  const doctor = doctorMap.get(String(appointment.doctorId)) || null;
 
   return {
     id: String(appointment._id),
@@ -82,6 +82,36 @@ async function serializeAppointment(appointment) {
   };
 }
 
+async function serializeAppointment(appointment) {
+  const [patient, doctor] = await Promise.all([
+    User.findById(appointment.patientId).select('name email phone').lean(),
+    Doctor.findById(appointment.doctorId).lean()
+  ]);
+
+  const patientMap = patient ? new Map([[String(patient._id), patient]]) : new Map();
+  const doctorMap = doctor ? new Map([[String(doctor._id), doctor]]) : new Map();
+  return serializeAppointmentRow(appointment, patientMap, doctorMap);
+}
+
+async function serializeAppointments(appointments) {
+  if (!appointments.length) return [];
+
+  const patientIds = [...new Set(appointments.map((row) => String(row.patientId)))];
+  const doctorIds = [...new Set(appointments.map((row) => String(row.doctorId)))];
+
+  const [patients, doctors] = await Promise.all([
+    User.find({ _id: { $in: patientIds } }).select('name email phone').lean(),
+    Doctor.find({ _id: { $in: doctorIds } }).lean()
+  ]);
+
+  const patientMap = new Map(patients.map((row) => [String(row._id), row]));
+  const doctorMap = new Map(doctors.map((row) => [String(row._id), row]));
+
+  return appointments.map((appointment) =>
+    serializeAppointmentRow(appointment, patientMap, doctorMap)
+  );
+}
+
 function canViewAppointment(actor, appointment, actorDoctorId) {
   if (!actor) return false;
   if (isAdmin(actor)) return true;
@@ -104,15 +134,16 @@ export async function listDoctorAppointmentRequests(actor, filters = {}) {
     throw new AppError(403, 'forbidden', 'Only doctors can list appointment requests.');
   }
 
-  return listAppointments(actor, {
+  const result = await listAppointments(actor, {
     ...filters,
-    status: filters.status || undefined
-  }).then((rows) =>
-    filters.status ? rows : rows.filter((row) => ACTIVE_REQUEST_STATUSES.includes(row.status))
-  );
+    status: filters.status || { $in: ACTIVE_REQUEST_STATUSES }
+  });
+
+  return result;
 }
 
 export async function listAppointments(actor, filters = {}) {
+  const { page, limit, status, doctorId, patientId, date } = filters;
   const query = {};
   const doctor = await actorDoctor(actor);
 
@@ -125,13 +156,20 @@ export async function listAppointments(actor, filters = {}) {
     query.doctorId = doctor._id;
   }
 
-  if (filters.status) query.status = filters.status;
-  if (filters.doctorId && isAdmin(actor)) query.doctorId = filters.doctorId;
-  if (filters.patientId && isAdmin(actor)) query.patientId = filters.patientId;
-  if (filters.date) query.date = filters.date;
+  if (status) query.status = status;
+  if (doctorId && isAdmin(actor)) query.doctorId = doctorId;
+  if (patientId && isAdmin(actor)) query.patientId = patientId;
+  if (date) query.date = date;
 
-  const rows = await Appointment.find(query).sort({ date: 1, createdAt: -1 }).lean();
-  return Promise.all(rows.map(serializeAppointment));
+  const { items, pagination } = await paginateQuery(Appointment, query, {
+    sort: { date: 1, createdAt: -1 },
+    pagination: { page, limit }
+  });
+
+  return {
+    appointments: await serializeAppointments(items),
+    pagination
+  };
 }
 
 export async function getAppointment(appointmentId, actor) {
@@ -379,22 +417,28 @@ export async function acceptAppointment(appointmentId, actor) {
   }
 
   const suggestions = await suggestAvailableDates(accepted.doctorId, accepted.date);
-  const others = await Appointment.find({
-    doctorId: accepted.doctorId,
-    date: accepted.date,
-    _id: { $ne: accepted._id },
-    status: { $in: ACTIVE_REQUEST_STATUSES }
-  });
-
   const reason = `${weekdayLabel(accepted.weekday)} is no longer available because another patient was accepted.`;
-  await Promise.all(
-    others.map((other) => {
-      other.status = suggestions.length ? 'ALTERNATIVE_OFFERED' : 'REJECTED';
-      other.rejectionReason = reason;
-      other.suggestedDates = suggestions;
-      return other.save();
-    })
-  );
+  const nextStatus = suggestions.length ? 'ALTERNATIVE_OFFERED' : 'REJECTED';
+
+  await withOptionalTransaction(async (session) => {
+    const options = session ? { session } : undefined;
+    await Appointment.updateMany(
+      {
+        doctorId: accepted.doctorId,
+        date: accepted.date,
+        _id: { $ne: accepted._id },
+        status: { $in: ACTIVE_REQUEST_STATUSES }
+      },
+      {
+        $set: {
+          status: nextStatus,
+          rejectionReason: reason,
+          suggestedDates: suggestions
+        }
+      },
+      options
+    );
+  });
 
   return serializeAppointment(accepted);
 }

@@ -30,6 +30,8 @@ import {
   randomToken,
   rotateRefreshToken
 } from './token.service.js';
+import { verifyClientAssertion } from './client-assertion.js';
+import { isAllowedRedirectUri, assertSafeExternalHttpsUrl } from '../lib/url-security.js';
 
 /* -------------------------------------------------------------------------- */
 /* Helpers                                                                    */
@@ -339,6 +341,10 @@ function cimdAuthMethod(metadata) {
     .concat(metadata?.token_endpoint_auth_methods_supported || [])
     .map(String);
 
+  if (methods.includes('private_key_jwt')) {
+    return 'private_key_jwt';
+  }
+
   if (methods.includes('none')) {
     return 'none';
   }
@@ -351,15 +357,9 @@ async function fetchClientIdMetadataDocument(clientId) {
     return null;
   }
 
-  let parsed;
-
   try {
-    parsed = new URL(clientId);
+    await assertSafeExternalHttpsUrl(clientId);
   } catch {
-    return null;
-  }
-
-  if (parsed.protocol !== 'https:') {
     return null;
   }
 
@@ -415,7 +415,7 @@ async function fetchClientIdMetadataDocument(clientId) {
     const normalized =
       normalizeRedirectUri(redirectUri);
 
-    if (!normalized) {
+    if (!normalized || !isAllowedRedirectUri(normalized)) {
       continue;
     }
 
@@ -507,6 +507,14 @@ export async function findClient(clientId) {
 }
 
 export async function registerClient(body = {}) {
+  if (!config.oauthDcrEnabled) {
+    throw new AppError(
+      403,
+      'registration_not_allowed',
+      'Dynamic client registration is disabled.'
+    );
+  }
+
   const redirectUris = body.redirect_uris;
 
   if (
@@ -528,7 +536,8 @@ export async function registerClient(body = {}) {
           uri.trim()
       )
       .map(normalizeRedirectUri)
-      .filter(Boolean);
+      .filter(Boolean)
+      .filter(isAllowedRedirectUri);
 
   if (!normalizedRedirectUris.length) {
     throw new AppError(
@@ -547,7 +556,8 @@ export async function registerClient(body = {}) {
   const supportedMethods = [
     'none',
     'client_secret_post',
-    'client_secret_basic'
+    'client_secret_basic',
+    'private_key_jwt'
   ];
 
   if (!supportedMethods.includes(authMethod)) {
@@ -561,7 +571,7 @@ export async function registerClient(body = {}) {
   let clientSecret;
   let clientSecretHash = null;
 
-  if (authMethod !== 'none') {
+  if (authMethod !== 'none' && authMethod !== 'private_key_jwt') {
     clientSecret = randomToken();
     clientSecretHash = hashToken(clientSecret);
   }
@@ -935,6 +945,43 @@ async function authenticateOAuthClient(
       'invalid_grant',
       'Authorization code does not belong to this client.'
     );
+  }
+
+  if (client.tokenEndpointAuthMethod === 'private_key_jwt') {
+    const assertion = firstString(req.body?.client_assertion);
+    const assertionType = firstString(req.body?.client_assertion_type);
+
+    if (assertionType !== 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer') {
+      throw new AppError(
+        401,
+        'invalid_client',
+        'Client authentication failed.'
+      );
+    }
+
+    if (!assertion || !client.jwksUri) {
+      throw new AppError(
+        401,
+        'invalid_client',
+        'Client authentication failed.'
+      );
+    }
+
+    const valid = await verifyClientAssertion(assertion, {
+      clientId: client.clientId,
+      jwksUri: client.jwksUri,
+      tokenEndpoint: `${issuerUrl()}/oauth/token`
+    });
+
+    if (!valid) {
+      throw new AppError(
+        401,
+        'invalid_client',
+        'Invalid client'
+      );
+    }
+
+    return client;
   }
 
   if (

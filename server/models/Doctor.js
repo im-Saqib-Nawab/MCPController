@@ -40,6 +40,7 @@ doctorSchema.index(
     name: 'unique_doctor_user'
   }
 );
+doctorSchema.index({ createdAt: -1 });
 
 doctorSchema.pre('validate', function applyDefaultSchedule() {
   if (!this.weeklyAvailability) {

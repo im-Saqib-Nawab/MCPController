@@ -9,6 +9,10 @@ import { defaultScopesForRole } from './permission.service.js';
 import { revokeUserTokens } from './token.service.js';
 import { Connection } from '../models/Connection.js';
 import { featuresForUser } from './featureFlag.service.js';
+import { paginateQuery } from '../lib/pagination.js';
+import { withOptionalTransaction } from '../lib/transactions.js';
+import { grantInitialCredits } from './credit.service.js';
+import { getActiveSubscription } from './subscription.service.js';
 
 function cookieMaxAgeMs() {
   const value = String(config.jwtExpiresIn || '7d');
@@ -18,12 +22,23 @@ function cookieMaxAgeMs() {
   return 7 * 24 * 60 * 60 * 1000;
 }
 
-export function setSessionCookie(res, user) {
+export async function bumpSessionVersion(userId) {
+  const updated = await User.findByIdAndUpdate(
+    userId,
+    { $inc: { sessionVersion: 1 } },
+    { new: true }
+  ).lean();
+
+  return updated?.sessionVersion ?? 0;
+}
+
+export function setSessionCookie(res, user, sessionVersion = user.sessionVersion ?? 0) {
   const token = jwt.sign(
     {
       sub: String(user._id || user.id),
       email: user.email,
-      role: publicRole(user)
+      role: publicRole(user),
+      sv: sessionVersion
     },
     config.jwtSecret,
     { expiresIn: config.jwtExpiresIn }
@@ -74,6 +89,10 @@ export async function serializeUserWithProfile(user) {
     extras.availability = doctor?.availability || summarizeAvailability(doctor?.weeklyAvailability);
   }
   extras.features = await featuresForUser(user);
+  extras.creditBalance = user.creditBalance ?? 0;
+  if (!isAdmin(user)) {
+    extras.subscription = await getActiveSubscription(user._id || user.id);
+  }
   return serializeUser(user, extras);
 }
 
@@ -93,7 +112,6 @@ export async function ensureAdminUser() {
     user.name = 'Admin';
     user.role = 'admin';
     user.allowedScopes = [...config.scopes];
-    user.password = config.adminPassword;
     await user.save();
   }
 
@@ -166,7 +184,10 @@ export async function registerUser({
     });
   }
 
-  return serializeUserWithProfile(user);
+  await grantInitialCredits(user._id);
+
+  const freshUser = await User.findById(user._id).lean();
+  return serializeUserWithProfile(freshUser);
 }
 
 export async function loginUser({ email, password }) {
@@ -174,11 +195,23 @@ export async function loginUser({ email, password }) {
   const adminEmail = config.adminEmail.toLowerCase().trim();
 
   if (normalizedEmail === adminEmail) {
-    if (password !== config.adminPassword) {
+    await ensureAdminUser();
+    const admin = await User.findOne({ email: adminEmail }).select('+password');
+    if (!admin) {
       throw new AppError(401, 'invalid_credentials', 'Invalid email or password.');
     }
-    const admin = await ensureAdminUser();
-    return serializeUserWithProfile(admin);
+
+    const valid = await admin.comparePassword(password);
+    if (!valid) {
+      throw new AppError(401, 'invalid_credentials', 'Invalid email or password.');
+    }
+
+    const sessionVersion = await bumpSessionVersion(admin._id);
+    const freshAdmin = await User.findById(admin._id).lean();
+    return {
+      user: await serializeUserWithProfile(freshAdmin),
+      sessionVersion
+    };
   }
 
   const user = await User.findOne({ email: normalizedEmail }).select('+password');
@@ -199,7 +232,12 @@ export async function loginUser({ email, password }) {
     await user.save();
   }
 
-  return serializeUserWithProfile(user);
+  const sessionVersion = await bumpSessionVersion(user._id);
+  const freshUser = await User.findById(user._id).lean();
+  return {
+    user: await serializeUserWithProfile(freshUser),
+    sessionVersion
+  };
 }
 
 export async function updateOwnProfile(userId, fields) {
@@ -239,9 +277,15 @@ export async function updateOwnProfile(userId, fields) {
   return serializeUserWithProfile(user);
 }
 
-export async function listUsers() {
-  const users = await User.find().sort({ createdAt: -1 }).lean();
-  return users.map((user) => serializeUser(user));
+export async function listUsers(pagination = {}) {
+  const { items, pagination: meta } = await paginateQuery(User, {}, {
+    sort: { createdAt: -1 },
+    pagination
+  });
+  return {
+    users: items.map((user) => serializeUser(user)),
+    pagination: meta
+  };
 }
 
 export async function updateUserPermissions(userId, allowedScopes) {
@@ -255,9 +299,14 @@ export async function updateUserPermissions(userId, allowedScopes) {
   }
 
   user.allowedScopes = normalizeAllowedScopes(allowedScopes);
-  await user.save();
-  await revokeUserTokens(user._id);
-  await Connection.deleteMany({ userId: user._id });
+
+  await withOptionalTransaction(async (session) => {
+    const options = session ? { session } : undefined;
+    await user.save(options);
+    await revokeUserTokens(user._id, options);
+    await Connection.deleteMany({ userId: user._id }, options);
+  });
+
   return serializeUser(user);
 }
 

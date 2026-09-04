@@ -3,6 +3,7 @@ import {
   logOperation,
   runWithContext
 } from '../lib/request-context.js';
+import { recordHttpRequest } from '../lib/runtime-metrics.js';
 
 function actorFromRequest(req) {
   const userId = req.user?._id ? String(req.user._id) : req.auth?.extra?.userId;
@@ -67,6 +68,13 @@ export function requestLogMiddleware(req, res, next) {
       const durationMs = Date.now() - context.startTime;
       const level =
         res.statusCode >= 500 ? 'error' : res.statusCode >= 400 ? 'warn' : 'info';
+
+      recordHttpRequest({
+        method: req.method,
+        route: req.path,
+        statusCode: res.statusCode,
+        durationMs
+      });
 
       logOperation(level, 'http.request.completed', {
         method: req.method,

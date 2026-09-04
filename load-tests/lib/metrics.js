@@ -5,7 +5,8 @@ function percentile(sorted, p) {
 }
 
 export class MetricsCollector {
-  constructor() {
+  constructor(maxRequests = 10000) {
+    this.maxRequests = maxRequests;
     this.reset();
   }
 
@@ -34,6 +35,9 @@ export class MetricsCollector {
     };
 
     this.requests.push(entry);
+    if (this.requests.length > this.maxRequests) {
+      this.requests.splice(0, this.requests.length - this.maxRequests);
+    }
 
     if (!this.byScenario.has(scenario)) {
       this.byScenario.set(scenario, []);

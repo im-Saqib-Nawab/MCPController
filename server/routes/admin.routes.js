@@ -3,6 +3,7 @@ import { requireAdmin } from '../middleware/auth.middleware.js';
 import * as adminController from '../controllers/admin.controller.js';
 import * as observabilityController from '../controllers/observability.controller.js';
 import * as testCenterController from '../controllers/testCenter.controller.js';
+import * as creditController from '../controllers/credit.controller.js';
 
 const router = Router();
 
@@ -31,5 +32,8 @@ router.get('/testing/runs', testCenterController.runs);
 router.get('/testing/runs/:runId', testCenterController.runDetail);
 router.get('/testing/live-observability', testCenterController.liveObservability);
 router.get('/testing/traces/:requestId', testCenterController.traceDetail);
+
+router.get('/credits/overview', creditController.adminOverview);
+router.get('/credits/users', creditController.adminUserCredits);
 
 export default router;

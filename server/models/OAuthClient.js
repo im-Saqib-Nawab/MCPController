@@ -9,7 +9,7 @@ const oauthClientSchema = new mongoose.Schema(
     allowedScopes: { type: [String], required: true, default: [] },
     tokenEndpointAuthMethod: {
       type: String,
-      enum: ['none', 'client_secret_post', 'client_secret_basic'],
+      enum: ['none', 'client_secret_post', 'client_secret_basic', 'private_key_jwt'],
       default: 'none'
     },
     grantTypes: {

@@ -33,10 +33,12 @@ function parseOrThrow(schema, data) {
 
 export async function listMedicines(req, res, next) {
   try {
-    const medicines = await medicineService.listMedicines(req.user, {
-      doctorId: req.query.doctorId
+    const result = await medicineService.listMedicines(req.user, {
+      doctorId: req.query.doctorId,
+      page: req.query.page,
+      limit: req.query.limit
     });
-    res.json({ medicines });
+    res.json(result);
   } catch (err) {
     next(err);
   }

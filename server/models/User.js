@@ -30,10 +30,22 @@ const userSchema = new mongoose.Schema(
     allowedScopes: {
       type: [String],
       default: () => ['doctor:read', 'availability:read', 'appointment:read', 'appointment:create', 'appointment:update', 'profile:read', 'profile:update']
+    },
+    sessionVersion: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
+    creditBalance: {
+      type: Number,
+      default: 0,
+      min: 0
     }
   },
   { timestamps: true }
 );
+
+userSchema.index({ role: 1, createdAt: -1 });
 
 userSchema.pre('save', async function hashPasswordIfNeeded() {
   if (!this.isModified('password')) return;
@@ -55,6 +67,7 @@ userSchema.methods.toSafeObject = function toSafeObject() {
     gender: this.gender || '',
     bio: this.bio || '',
     allowedScopes: [...this.allowedScopes],
+    creditBalance: this.creditBalance ?? 0,
     createdAt: this.createdAt,
     updatedAt: this.updatedAt
   };

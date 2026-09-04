@@ -1,6 +1,7 @@
 import { logError } from '../lib/request-context.js';
 import { logAuditFailure } from '../lib/audit-log.js';
 import { config } from '../config/env.js';
+import { captureServerError } from '../lib/sentry.js';
 
 export class AppError extends Error {
   constructor(status, code, message, details) {
@@ -53,6 +54,16 @@ export function errorMiddleware(err, req, res, next) {
       actorName: req.user?.name || req.auth?.extra?.actorName,
       role: req.user?.role || req.auth?.extra?.role,
       clientId: req.auth?.clientId
+    });
+  }
+
+  if (status >= 500) {
+    captureServerError(err, {
+      requestId: req.requestId,
+      method: req.method,
+      route: req.path,
+      statusCode: status,
+      errorCode: code
     });
   }
 

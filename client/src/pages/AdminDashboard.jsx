@@ -192,6 +192,10 @@ export default function AdminDashboard({ user }) {
         <Link to="/admin/observability" className="text-slate-700 underline hover:text-slate-900">
           Open observability
         </Link>
+        {' · '}
+        <Link to="/admin/credits" className="text-slate-700 underline hover:text-slate-900">
+          Credit monitoring
+        </Link>
       </p>
 
       {error ? <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}

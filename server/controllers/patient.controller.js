@@ -40,8 +40,8 @@ const updateSchema = z.object({
 export async function listPatients(req, res, next) {
   try {
     requireUserScope(req.user, 'patient:read');
-    const patients = await patientService.listPatients(req.user);
-    res.json({ patients });
+    const result = await patientService.listPatients(req.user, req.query);
+    res.json(result);
   } catch (err) {
     next(err);
   }

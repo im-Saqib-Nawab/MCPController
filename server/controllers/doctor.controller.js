@@ -57,8 +57,8 @@ function requireScopeForUser(user, scope) {
 export async function listDoctors(req, res, next) {
   try {
     requireUserScope(req.user, 'doctor:read');
-    const doctors = await doctorService.listDoctorsPublic();
-    res.json({ doctors });
+    const result = await doctorService.listDoctorsPublic(req.query);
+    res.json(result);
   } catch (err) {
     next(err);
   }

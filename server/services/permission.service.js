@@ -78,7 +78,13 @@ export const TOOL_SCOPES = {
   check_doctor_availability: 'availability:read',
   update_availability: 'availability:update',
   get_my_profile: 'profile:read',
-  update_my_profile: 'profile:update'
+  update_my_profile: 'profile:update',
+  get_credit_balance: 'profile:read',
+  list_subscription_plans: 'profile:read',
+  get_credit_usage_summary: 'profile:read',
+  get_purchase_link: 'profile:read',
+  explain_credits: 'profile:read',
+  continue_previous_task: 'profile:read'
 };
 
 export const ACCEPTED_REQUEST_SCOPES = [...config.scopes, LEGACY_WRITE_SCOPE];

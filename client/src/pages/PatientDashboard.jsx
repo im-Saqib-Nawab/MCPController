@@ -4,6 +4,7 @@ import Button from '../components/Button.jsx';
 import AppointmentBadge from '../components/AppointmentBadge.jsx';
 import { STATUS_META } from '../lib/status.js';
 import { api, getErrorMessage } from '../services/api.js';
+import CreditBalanceCard from '../components/CreditBalanceCard.jsx';
 
 export default function PatientDashboard({ user }) {
   const [appointments, setAppointments] = useState([]);
@@ -68,6 +69,13 @@ export default function PatientDashboard({ user }) {
 
       {error ? <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
       {success ? <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{success}</div> : null}
+
+      <div className="mt-6">
+        <CreditBalanceCard
+          balance={user.creditBalance ?? 0}
+          subscription={user.subscription}
+        />
+      </div>
 
       <section className="mt-8">
         <h2 className="text-lg font-semibold text-slate-900">Doctors</h2>

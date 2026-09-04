@@ -18,6 +18,10 @@
  * Vercel invocations.
  */
 
+import { initSentry } from '../server/lib/sentry.js';
+
+initSentry();
+
 import app from '../server/app.js';
 
 /**

@@ -1,7 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/server';
 import * as z from 'zod/v4';
 import { config } from '../config/env.js';
-import { logError, logOperation } from '../lib/request-context.js';
+import { logError, logOperation, getRequestContext } from '../lib/request-context.js';
 import { logAudit, mcpActionLabel } from '../lib/audit-log.js';
 import { listDoctorsTool } from './tools/listDoctors.tool.js';
 import { getDoctorTool } from './tools/getDoctor.tool.js';
@@ -33,7 +33,27 @@ import {
 import { getMyProfileTool, updateMyProfileTool, updateAvailabilityTool } from './tools/profile.tools.js';
 import { checkDoctorAvailabilityTool } from './tools/availability.tools.js';
 import { searchLogsTool, getRequestLogsTool } from './tools/logs.tools.js';
+import {
+  getCreditBalanceTool,
+  listSubscriptionPlansTool,
+  getCreditUsageSummaryTool,
+  getPurchaseLinkTool,
+  explainCreditsTool,
+  continuePreviousTaskTool
+} from './tools/credit.tools.js';
 import { isToolExposed } from '../services/permission.service.js';
+import { User } from '../models/User.js';
+import {
+  getToolCreditCost,
+  deductCredits,
+  logAdminBypass,
+  checkCreditConfirmation,
+  buildInsufficientCreditsPayload,
+  buildConfirmationPayload,
+  InsufficientCreditsError,
+  CreditConfirmationRequiredError
+} from '../services/credit.service.js';
+import * as mcpSessionService from '../services/mcp-session.service.js';
 
 const weeklyAvailabilitySchema = z
   .object({
@@ -64,18 +84,88 @@ function wrap(toolName, handler, authInfo) {
       clientId: authInfo?.clientId
     };
     const action = mcpActionLabel(toolName);
+    const requestId = getRequestContext()?.requestId || '';
+    const cost = getToolCreditCost(toolName);
+    const isAdminUser = actor.role === 'admin';
 
-    logOperation('info', 'mcp.tool.started', { tool: toolName, ...actor });
+    logOperation('info', 'mcp.tool.started', { tool: toolName, creditCost: cost, ...actor });
 
     try {
+      // Credit pre-check (after auth, before execution)
+      if (!isAdminUser && cost > 0) {
+        const user = await User.findById(actor.userId).select('creditBalance role').lean();
+        const balance = user?.creditBalance ?? 0;
+
+        const confirmationError = checkCreditConfirmation(toolName, cost, balance, args || {});
+        if (confirmationError instanceof CreditConfirmationRequiredError) {
+          const payload = buildConfirmationPayload(confirmationError);
+          return {
+            content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }],
+            isError: true
+          };
+        }
+        if (confirmationError instanceof InsufficientCreditsError) {
+          const session = await mcpSessionService.setPendingStep({
+            userId: actor.userId,
+            clientId: actor.clientId,
+            tool: toolName,
+            args: args || {}
+          });
+          const payload = buildInsufficientCreditsPayload(confirmationError, session);
+          return {
+            content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }],
+            isError: true
+          };
+        }
+      }
+
       const result = await handler(args || {});
       const durationMs = Date.now() - start;
       const failed = Boolean(result?.isError);
+
+      // Deduct credits only on successful execution
+      let creditInfo = null;
+      if (!failed) {
+        if (isAdminUser) {
+          await logAdminBypass({ userId: actor.userId, tool: toolName, requestId });
+          creditInfo = { charged: 0, balance: null, bypass: 'admin' };
+        } else if (cost > 0) {
+          const idempotencyKey = args?.idempotencyKey
+            ? `${toolName}:${args.idempotencyKey}`
+            : '';
+          const deduction = await deductCredits({
+            userId: actor.userId,
+            amount: cost,
+            tool: toolName,
+            action,
+            requestId,
+            idempotencyKey,
+            description: `${action} via MCP`
+          });
+          creditInfo = {
+            charged: deduction.deducted,
+            balance: deduction.balance,
+            duplicate: deduction.duplicate
+          };
+
+          await mcpSessionService.recordCompletedStep({
+            userId: actor.userId,
+            clientId: actor.clientId,
+            tool: toolName,
+            summary: action,
+            creditsUsed: cost
+          });
+        } else {
+          creditInfo = { charged: 0, balance: await User.findById(actor.userId).select('creditBalance').lean().then((u) => u?.creditBalance ?? 0) };
+        }
+      }
 
       logOperation(failed ? 'warn' : 'info', failed ? 'mcp.tool.failed' : 'mcp.tool.completed', {
         tool: toolName,
         durationMs,
         success: !failed,
+        creditCost: cost,
+        creditsCharged: creditInfo?.charged ?? 0,
         ...actor
       });
 
@@ -90,11 +180,53 @@ function wrap(toolName, handler, authInfo) {
         status: failed ? 'error' : 'success',
         level: failed ? 'warn' : 'info',
         tool: toolName,
-        durationMs
+        durationMs,
+        creditsCharged: creditInfo?.charged ?? 0
       });
+
+      // Append credit info to successful responses
+      if (!failed && creditInfo && result?.content?.[0]?.type === 'text') {
+        try {
+          const parsed = JSON.parse(result.content[0].text);
+          if (Array.isArray(parsed)) {
+            result.content[0].text = JSON.stringify({ data: parsed, credits: creditInfo }, null, 2);
+          } else {
+            parsed.credits = creditInfo;
+            if (creditInfo.balance !== null && creditInfo.balance <= 10) {
+              parsed.creditWarning =
+                creditInfo.balance === 0
+                  ? 'Credits exhausted. Purchase a plan to continue.'
+                  : `Low credits: ${creditInfo.balance} remaining.`;
+            }
+            result.content[0].text = JSON.stringify(parsed, null, 2);
+          }
+        } catch {
+          // Non-JSON tool response — wrap with credit metadata
+          result.content[0].text = JSON.stringify(
+            { data: result.content[0].text, credits: creditInfo },
+            null,
+            2
+          );
+        }
+      }
 
       return result;
     } catch (err) {
+      // Do not deduct credits on thrown errors (validation, permission, DB failures)
+      if (err instanceof InsufficientCreditsError) {
+        const session = await mcpSessionService.setPendingStep({
+          userId: actor.userId,
+          clientId: actor.clientId,
+          tool: toolName,
+          args: args || {}
+        });
+        const payload = buildInsufficientCreditsPayload(err, session);
+        return {
+          content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }],
+          isError: true
+        };
+      }
+
       logError(err, {
         operation: 'mcp.tool.error',
         tool: toolName,
@@ -134,7 +266,7 @@ export function buildMcpServer(authInfo) {
     name: config.mcpServerName,
     version: config.mcpServerVersion,
     instructions:
-      'Doctor-patient appointment MCP for the full clinic system. Roles: admin (manage everything), doctor (own profile, availability, appointment requests), patient (browse doctors, book appointments). Appointment statuses: REQUESTED (pending), ACCEPTED, REJECTED, ALTERNATIVE_OFFERED, CANCELLED, COMPLETED. Backend rules: one accepted patient per doctor per day; cancelled/rejected days become available again; no self-booking; no past dates; no booking on unavailable weekdays. Tools are filtered to OAuth token scopes. Log tools (search_logs, get_request_logs) are administrator-only.'
+      'Doctor-patient appointment MCP for the full clinic system. Roles: admin (manage everything, no credit charges), doctor (own profile, availability, appointment requests), patient (browse doctors, book appointments). Credits: each tool consumes credits (see explain_credits). Multi-step tasks check credits per step — if credits run out, completed steps are preserved; use continue_previous_task after purchasing. Free tools: get_credit_balance, list_subscription_plans, explain_credits, get_purchase_link. Expensive operations may require confirm: true. Appointment statuses: REQUESTED, ACCEPTED, REJECTED, ALTERNATIVE_OFFERED, CANCELLED, COMPLETED.'
   });
 
   function registerAllowed(toolName, definition, handler) {
@@ -298,7 +430,9 @@ export function buildMcpServer(authInfo) {
       description: 'Patient requests an appointment on an available date. Requires appointment:create.',
       inputSchema: z.object({
         doctorId: z.string().min(1),
-        date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe('Appointment date YYYY-MM-DD')
+        date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe('Appointment date YYYY-MM-DD'),
+        confirm: z.boolean().optional().describe('Set true to confirm when this uses most of your remaining credits'),
+        idempotencyKey: z.string().optional().describe('Optional idempotency key to prevent duplicate bookings')
       })
     },
     requestAppointmentTool(authInfo)
@@ -518,6 +652,69 @@ export function buildMcpServer(authInfo) {
       annotations: { readOnlyHint: true }
     },
     getRequestLogsTool(authInfo)
+  );
+
+  registerAllowed(
+    'get_credit_balance',
+    {
+      description: 'Return current credit balance, usage this month, and subscription status. Free — no credits consumed.',
+      inputSchema: z.object({}),
+      annotations: { readOnlyHint: true }
+    },
+    getCreditBalanceTool(authInfo)
+  );
+
+  registerAllowed(
+    'list_subscription_plans',
+    {
+      description: 'List available subscription plans with pricing and credits. Free — no credits consumed.',
+      inputSchema: z.object({}),
+      annotations: { readOnlyHint: true }
+    },
+    listSubscriptionPlansTool(authInfo)
+  );
+
+  registerAllowed(
+    'get_credit_usage_summary',
+    {
+      description: 'Return credit usage summary and recent transactions. Free — no credits consumed.',
+      inputSchema: z.object({}),
+      annotations: { readOnlyHint: true }
+    },
+    getCreditUsageSummaryTool(authInfo)
+  );
+
+  registerAllowed(
+    'get_purchase_link',
+    {
+      description: 'Get a link to purchase a subscription plan and add credits. Free — no credits consumed.',
+      inputSchema: z.object({
+        planId: z.enum(['monthly', 'yearly']).optional().describe('Plan to purchase (default: monthly)')
+      }),
+      annotations: { readOnlyHint: true }
+    },
+    getPurchaseLinkTool(authInfo)
+  );
+
+  registerAllowed(
+    'explain_credits',
+    {
+      description: 'Explain how the credit system works and list tool costs. Free — no credits consumed.',
+      inputSchema: z.object({}),
+      annotations: { readOnlyHint: true }
+    },
+    explainCreditsTool(authInfo)
+  );
+
+  registerAllowed(
+    'continue_previous_task',
+    {
+      description:
+        'Continue a multi-step task that stopped due to insufficient credits. Free — returns pending step info after purchasing credits.',
+      inputSchema: z.object({}),
+      annotations: { readOnlyHint: true }
+    },
+    continuePreviousTaskTool(authInfo)
   );
 
   return server;
