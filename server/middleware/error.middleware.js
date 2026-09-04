@@ -69,7 +69,8 @@ export function errorMiddleware(err, req, res, next) {
 
   const body = {
     error: code,
-    message: status >= 500 && config.isProduction ? 'An unexpected error occurred.' : message,
+    message:
+      config.isProduction && status >= 500 ? 'An unexpected error occurred.' : message,
     requestId: req.requestId
   };
 

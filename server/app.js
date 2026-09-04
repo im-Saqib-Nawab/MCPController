@@ -31,7 +31,7 @@ import {
   resourceMetadata
 } from './controllers/oauth.controller.js';
 
-import { errorMiddleware } from './middleware/error.middleware.js';
+import { errorMiddleware, AppError } from './middleware/error.middleware.js';
 import { requestLogMiddleware } from './middleware/request-log.middleware.js';
 import { csrfProtection } from './middleware/csrf.middleware.js';
 import { shouldSkipRateLimit } from './lib/rate-limit-policy.js';
@@ -45,6 +45,33 @@ const app = express();
 if (config.isProduction) {
   app.set('trust proxy', 1);
 }
+
+/* -------------------------------------------------------------------------- */
+/* Vercel path normalization                                                  */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Vercel rewrites can leave `req.url` as `/api` while `req.originalUrl` keeps
+ * the public path (for example `/api/auth/login`). Express routes match `req.url`,
+ * so restore the original pathname before any routing middleware runs.
+ */
+function vercelRequestPathMiddleware(req, res, next) {
+  if (!process.env.VERCEL) {
+    return next();
+  }
+
+  const originalPath = req.originalUrl?.split('?')[0] || '';
+  const currentPath = req.url?.split('?')[0] || '';
+
+  if (originalPath && currentPath && originalPath !== currentPath) {
+    const query = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+    req.url = `${originalPath}${query}`;
+  }
+
+  next();
+}
+
+app.use(vercelRequestPathMiddleware);
 
 /* -------------------------------------------------------------------------- */
 /* Security Headers                                                           */
@@ -178,20 +205,6 @@ app.use(
 
 app.use(cookieParser());
 
-const apiLimiter = rateLimit({
-  ...createMongoRateLimitOptions({ windowMs: 15 * 60 * 1000, limit: 300 }),
-  skip: shouldSkipRateLimit
-});
-
-app.use('/api', apiLimiter);
-app.use(csrfProtection);
-
-/* -------------------------------------------------------------------------- */
-/* Request logging & correlation IDs                                          */
-/* -------------------------------------------------------------------------- */
-
-app.use(requestLogMiddleware);
-
 function isStaticAsset(pathname) {
   return /\.(?:js|css|map|ico|png|jpg|jpeg|gif|svg|webp|woff2?|ttf)$/i.test(pathname);
 }
@@ -199,10 +212,6 @@ function isStaticAsset(pathname) {
 function isLivenessRoute(pathname) {
   return pathname === '/health/live' || pathname === '/api/health/live';
 }
-
-/* -------------------------------------------------------------------------- */
-/* Health Check Endpoints (before DB middleware)                              */
-/* -------------------------------------------------------------------------- */
 
 function livenessPayload() {
   return {
@@ -212,6 +221,10 @@ function livenessPayload() {
     environment: config.nodeEnv
   };
 }
+
+/* -------------------------------------------------------------------------- */
+/* Health Check Endpoints (before rate limits and DB middleware)              */
+/* -------------------------------------------------------------------------- */
 
 app.get('/health/live', (_req, res) => {
   res.status(200).json(livenessPayload());
@@ -271,9 +284,19 @@ app.get('/api/health/ready', async (_req, res) => {
 app.get('/metrics', metricsHandler);
 app.get('/api/metrics', metricsHandler);
 
+const apiLimiter = rateLimit({
+  ...createMongoRateLimitOptions({ windowMs: 15 * 60 * 1000, limit: 300 }),
+  skip: shouldSkipRateLimit
+});
+
+app.use('/api', apiLimiter);
+app.use(csrfProtection);
+
 /* -------------------------------------------------------------------------- */
-/* Deployment configuration guard                                              */
+/* Request logging & correlation IDs                                          */
 /* -------------------------------------------------------------------------- */
+
+app.use(requestLogMiddleware);
 
 function isConfigDiagnosticRoute(pathname) {
   return (
@@ -312,7 +335,13 @@ app.use(async (req, _res, next) => {
     await connectDatabase();
     next();
   } catch (err) {
-    next(err);
+    next(
+      new AppError(
+        503,
+        'service_unavailable',
+        'Database connection failed. Verify MONGODB_URI is set and reachable from Vercel.'
+      )
+    );
   }
 });
 

@@ -55,7 +55,8 @@ export class MongoRateLimitStore {
 }
 
 export function createMongoRateLimitOptions({ windowMs, limit }) {
-  const useMongoStore = !config.isTest;
+  // Serverless isolates should not depend on MongoDB before the DB connection middleware runs.
+  const useMongoStore = !config.isTest && !process.env.VERCEL;
 
   return {
     windowMs,
