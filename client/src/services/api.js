@@ -40,17 +40,44 @@ api.interceptors.request.use((requestConfig) => {
   return requestConfig;
 });
 
+function readApiErrorPayload(error) {
+  const data = error?.response?.data;
+
+  if (typeof data === 'string' && data.trim()) {
+    return data.split('\n')[0].trim();
+  }
+
+  if (!data || typeof data !== 'object') {
+    return null;
+  }
+
+  if (typeof data.message === 'string') {
+    return data.message;
+  }
+
+  if (data.message && typeof data.message === 'object' && typeof data.message.message === 'string') {
+    return data.message.message;
+  }
+
+  if (typeof data.error_description === 'string') {
+    return data.error_description;
+  }
+
+  if (typeof data.error === 'string') {
+    return data.error;
+  }
+
+  if (data.error && typeof data.error === 'object' && typeof data.error.message === 'string') {
+    return data.error.message;
+  }
+
+  return null;
+}
+
 export function getErrorMessage(error) {
-  if (error?.response?.data?.message) {
-    return error.response.data.message;
-  }
-
-  if (error?.response?.data?.error_description) {
-    return error.response.data.error_description;
-  }
-
-  if (error?.response?.data?.error) {
-    return error.response.data.error;
+  const apiMessage = readApiErrorPayload(error);
+  if (apiMessage) {
+    return apiMessage;
   }
 
   if (error?.message) {
