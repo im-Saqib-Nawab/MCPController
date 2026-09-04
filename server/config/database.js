@@ -51,10 +51,10 @@ export async function connectDatabase(uri = config.mongodbUri) {
   cache.uri = uri;
 
   cache.promise = mongoose.connect(uri, {
-    serverSelectionTimeoutMS: 10000,
+    serverSelectionTimeoutMS: process.env.VERCEL ? 5000 : 10000,
     maxPoolSize: config.mongodbMaxPoolSize,
     minPoolSize: config.mongodbMinPoolSize,
-    maxIdleTimeMS: 30000,
+    maxIdleTimeMS: process.env.VERCEL ? 10000 : 30000,
     socketTimeoutMS: 45000,
     waitQueueTimeoutMS: config.mongodbWaitQueueTimeoutMS
   });

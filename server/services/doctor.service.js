@@ -212,6 +212,18 @@ export function serializeDoctor(doctor, extras = {}) {
   };
 }
 
+export function serializeDoctorSummary(doctor, acceptedDates = new Set()) {
+  const weekly = normalizeWeeklyAvailability(doctor.weeklyAvailability);
+  const schedule = buildSchedule(doctor, acceptedDates);
+  return {
+    id: String(doctor._id),
+    name: doctor.name,
+    specialization: doctor.specialization,
+    availability: doctor.availability || summarizeAvailability(weekly),
+    nextAvailableDate: nextAvailableDate(schedule)
+  };
+}
+
 export function serializeDoctorPublic(doctor, acceptedDates = new Set()) {
   const weekly = normalizeWeeklyAvailability(doctor.weeklyAvailability);
   const schedule = buildSchedule(doctor, acceptedDates);
@@ -224,12 +236,13 @@ export function serializeDoctorPublic(doctor, acceptedDates = new Set()) {
   });
 }
 
-export async function listDoctorsPublic(pagination = {}) {
+export async function listDoctorsPublic(pagination = {}, { summary = false } = {}) {
   const { items: doctors, pagination: meta } = await listDoctors(pagination);
   const accepted = await acceptedDatesByDoctor(doctors.map((doctor) => doctor._id));
+  const serialize = summary ? serializeDoctorSummary : serializeDoctorPublic;
   return {
     doctors: doctors.map((doctor) =>
-      serializeDoctorPublic(doctor, accepted.get(String(doctor._id)) || new Set())
+      serialize(doctor, accepted.get(String(doctor._id)) || new Set())
     ),
     pagination: meta
   };

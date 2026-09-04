@@ -1,5 +1,5 @@
 import { McpServer } from '@modelcontextprotocol/server';
-import * as z from 'zod/v4';
+import { z } from 'zod';
 import { config } from '../config/env.js';
 import { logError, logOperation, getRequestContext } from '../lib/request-context.js';
 import { logAudit, mcpActionLabel } from '../lib/audit-log.js';

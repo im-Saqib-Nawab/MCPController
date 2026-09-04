@@ -17,12 +17,22 @@ async function readCachedFlag(key) {
   if (config.isTest) {
     let flag = await FeatureFlag.findOne({ key });
     if (!flag) {
-      flag = await FeatureFlag.create({
-        ...FEATURE_FLAG_DEFAULTS,
-        key,
-        name: key === MEDICINE_FEATURE_KEY ? FEATURE_FLAG_DEFAULTS.name : key,
-        description: key === MEDICINE_FEATURE_KEY ? FEATURE_FLAG_DEFAULTS.description : ''
-      });
+      try {
+        flag = await FeatureFlag.create({
+          ...FEATURE_FLAG_DEFAULTS,
+          key,
+          name: key === MEDICINE_FEATURE_KEY ? FEATURE_FLAG_DEFAULTS.name : key,
+          description: key === MEDICINE_FEATURE_KEY ? FEATURE_FLAG_DEFAULTS.description : ''
+        });
+      } catch (err) {
+        if (err?.code !== 11000) {
+          throw err;
+        }
+        flag = await FeatureFlag.findOne({ key });
+        if (!flag) {
+          throw err;
+        }
+      }
     }
     return flag;
   }
@@ -34,12 +44,22 @@ async function readCachedFlag(key) {
 
   let flag = await FeatureFlag.findOne({ key });
   if (!flag) {
-    flag = await FeatureFlag.create({
-      ...FEATURE_FLAG_DEFAULTS,
-      key,
-      name: key === MEDICINE_FEATURE_KEY ? FEATURE_FLAG_DEFAULTS.name : key,
-      description: key === MEDICINE_FEATURE_KEY ? FEATURE_FLAG_DEFAULTS.description : ''
-    });
+    try {
+      flag = await FeatureFlag.create({
+        ...FEATURE_FLAG_DEFAULTS,
+        key,
+        name: key === MEDICINE_FEATURE_KEY ? FEATURE_FLAG_DEFAULTS.name : key,
+        description: key === MEDICINE_FEATURE_KEY ? FEATURE_FLAG_DEFAULTS.description : ''
+      });
+    } catch (err) {
+      if (err?.code !== 11000) {
+        throw err;
+      }
+      flag = await FeatureFlag.findOne({ key });
+      if (!flag) {
+        throw err;
+      }
+    }
   }
 
   flagCache.set(key, {
@@ -107,7 +127,7 @@ async function doctorRecordForUser(actor) {
   return Doctor.findOne({ userId }).lean();
 }
 
-export async function getMedicineFeatureAccess(actor) {
+export async function getMedicineFeatureAccess(actor, { doctorRecord = null } = {}) {
   const flag = await getOrCreateFlag(MEDICINE_FEATURE_KEY);
   const serialized = serializeFlag(flag);
 
@@ -120,7 +140,7 @@ export async function getMedicineFeatureAccess(actor) {
   }
 
   if (isDoctor(actor)) {
-    const doctor = await doctorRecordForUser(actor);
+    const doctor = doctorRecord ?? await doctorRecordForUser(actor);
     const allowed = Boolean(doctor && isDoctorIncluded(flag, doctor._id));
     return { ...serialized, canView: allowed, canManage: allowed, doctorId: doctor ? String(doctor._id) : null };
   }
@@ -132,9 +152,9 @@ export async function getMedicineFeatureAccess(actor) {
   return { ...serialized, canView: false, canManage: false };
 }
 
-export async function featuresForUser(actor) {
+export async function featuresForUser(actor, { doctorRecord = null } = {}) {
   return {
-    [MEDICINE_FEATURE_KEY]: await getMedicineFeatureAccess(actor)
+    [MEDICINE_FEATURE_KEY]: await getMedicineFeatureAccess(actor, { doctorRecord })
   };
 }
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { Route, Routes } from 'react-router-dom';
 import Navbar from './components/Navbar.jsx';
 import ProtectedRoute from './components/ProtectedRoute.jsx';
@@ -13,14 +13,19 @@ import Medicines from './pages/Medicines.jsx';
 import Profile from './pages/Profile.jsx';
 import Authorize from './pages/Authorize.jsx';
 import Success from './pages/Success.jsx';
-import Observability from './pages/Observability.jsx';
-import TestingCenter from './pages/TestingCenter.jsx';
 import Credits from './pages/Credits.jsx';
 import CreditHistory from './pages/CreditHistory.jsx';
 import Plans from './pages/Plans.jsx';
 import PurchaseSuccess from './pages/PurchaseSuccess.jsx';
-import AdminCreditsPage from './pages/AdminCreditsPage.jsx';
 import { api } from './services/api.js';
+
+const TestingCenter = lazy(() => import('./pages/TestingCenter.jsx'));
+const Observability = lazy(() => import('./pages/Observability.jsx'));
+const AdminCreditsPage = lazy(() => import('./pages/AdminCreditsPage.jsx'));
+
+function PageFallback() {
+  return <div className="px-4 py-16 text-center text-sm text-slate-500">Loading…</div>;
+}
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -33,14 +38,6 @@ export default function App() {
       .catch(() => setUser(null))
       .finally(() => setLoading(false));
   }, []);
-
-  if (loading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center px-4 text-sm text-slate-500">
-        Checking your session...
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen">
@@ -101,7 +98,9 @@ export default function App() {
           path="/admin/testing"
           element={
             <AdminRoute user={user} loading={loading}>
-              <TestingCenter />
+              <Suspense fallback={<PageFallback />}>
+                <TestingCenter />
+              </Suspense>
             </AdminRoute>
           }
         />
@@ -109,7 +108,9 @@ export default function App() {
           path="/admin/observability"
           element={
             <AdminRoute user={user} loading={loading}>
-              <Observability />
+              <Suspense fallback={<PageFallback />}>
+                <Observability />
+              </Suspense>
             </AdminRoute>
           }
         />
@@ -149,7 +150,9 @@ export default function App() {
           path="/admin/credits"
           element={
             <AdminRoute user={user} loading={loading}>
-              <AdminCreditsPage />
+              <Suspense fallback={<PageFallback />}>
+                <AdminCreditsPage />
+              </Suspense>
             </AdminRoute>
           }
         />

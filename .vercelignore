@@ -1,0 +1,6 @@
+load-tests/
+tests/
+.github/
+server/seed/
+*.md
+client/dist/

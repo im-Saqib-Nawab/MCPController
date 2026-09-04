@@ -24,6 +24,7 @@ function readCsrfToken() {
 export const api = axios.create({
   baseURL: '/api',
   withCredentials: true,
+  timeout: 15000,
   headers: {
     Accept: 'application/json'
   }

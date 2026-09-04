@@ -11,6 +11,7 @@ const isDevelopment = nodeEnv === 'development';
 const isStaging = nodeEnv === 'staging';
 const isProduction = nodeEnv === 'production';
 const isTest = nodeEnv === 'test';
+const onVercel = Boolean(process.env.VERCEL);
 
 dotenv.config({ path: path.join(root, '.env') });
 dotenv.config({ path: path.join(root, `.env.${nodeEnv}`), override: true });
@@ -30,39 +31,47 @@ const weakAdminPasswords = new Set([
   'password123'
 ]);
 
-function validateDeployedEnvironment() {
-  const required = ['MONGODB_URI', 'JWT_SECRET', 'ADMIN_EMAIL', 'ADMIN_PASSWORD', 'APP_URL', 'API_URL'];
-  if (isProduction) {
-    required.push('METRICS_TOKEN');
+function collectDeployedEnvironmentErrors() {
+  if (!isProduction && !isStaging) {
+    return [];
   }
 
+  const errors = [];
+  const required = ['MONGODB_URI', 'JWT_SECRET', 'ADMIN_EMAIL', 'ADMIN_PASSWORD', 'APP_URL', 'API_URL'];
   const missing = required.filter((name) => !String(process.env[name] || '').trim());
+
   if (missing.length) {
-    throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
+    errors.push(`Missing required environment variables: ${missing.join(', ')}`);
   }
 
   if (isProduction) {
     if (weakSecrets.has(process.env.JWT_SECRET)) {
-      throw new Error('JWT_SECRET must be a unique strong value in production.');
+      errors.push('JWT_SECRET must be a unique strong value in production.');
     }
     const adminPassword = String(process.env.ADMIN_PASSWORD || '');
     if (adminPassword.length < 12 || weakAdminPasswords.has(adminPassword)) {
-      throw new Error('ADMIN_PASSWORD must be at least 12 characters and not a common default in production.');
+      errors.push('ADMIN_PASSWORD must be at least 12 characters and not a common default in production.');
     }
     if (process.env.TEST_CENTER_ENABLED === 'true') {
-      throw new Error('TEST_CENTER_ENABLED must not be true in production.');
+      errors.push('TEST_CENTER_ENABLED must not be true in production.');
     }
   }
 
   if (isStaging && process.env.STAGING_ALLOW_WEAK_SECRETS !== 'true') {
     if (weakSecrets.has(process.env.JWT_SECRET)) {
-      throw new Error('JWT_SECRET must not use development defaults in staging.');
+      errors.push('JWT_SECRET must not use development defaults in staging.');
     }
   }
+
+  return errors;
 }
 
-if (isProduction || isStaging) {
-  validateDeployedEnvironment();
+export const deploymentConfigErrors = collectDeployedEnvironmentErrors();
+
+export function assertDeployedEnvironment() {
+  if (deploymentConfigErrors.length) {
+    throw new Error(deploymentConfigErrors[0]);
+  }
 }
 
 export const config = {
@@ -89,8 +98,10 @@ export const config = {
   metricsToken: process.env.METRICS_TOKEN || '',
   sentryDsn: process.env.SENTRY_DSN || '',
   testCenterEnabled: process.env.TEST_CENTER_ENABLED === 'true' || isDevelopment || isTest,
-  mongodbMaxPoolSize: Number(process.env.MONGODB_MAX_POOL_SIZE) || (isProduction || isStaging ? 30 : 50),
-  mongodbMinPoolSize: Number(process.env.MONGODB_MIN_POOL_SIZE) || 5,
+  mongodbMaxPoolSize:
+    Number(process.env.MONGODB_MAX_POOL_SIZE) ||
+    (onVercel ? 10 : isProduction || isStaging ? 30 : 50),
+  mongodbMinPoolSize: Number(process.env.MONGODB_MIN_POOL_SIZE) || (onVercel ? 0 : 5),
   mongodbWaitQueueTimeoutMS: Number(process.env.MONGODB_WAIT_QUEUE_TIMEOUT_MS) || 10000,
   featureFlagCacheTtlMs: Number(process.env.FEATURE_FLAG_CACHE_TTL_MS) || 60000,
   syncIndexesOnStartup: process.env.SYNC_INDEXES_ON_STARTUP === 'true' || isDevelopment || isTest,

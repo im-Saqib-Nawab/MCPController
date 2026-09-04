@@ -81,14 +81,15 @@ export function serializeUser(user, extras = {}) {
 
 export async function serializeUserWithProfile(user) {
   const extras = {};
+  let doctorRecord = null;
   if (normalizeRole(user.role) === ROLES.DOCTOR) {
-    const doctor = await Doctor.findOne({ userId: user._id || user.id }).lean();
-    extras.doctorId = doctor ? String(doctor._id) : null;
-    extras.specialization = doctor?.specialization || '';
-    extras.weeklyAvailability = doctor?.weeklyAvailability || defaultWeeklyAvailability();
-    extras.availability = doctor?.availability || summarizeAvailability(doctor?.weeklyAvailability);
+    doctorRecord = await Doctor.findOne({ userId: user._id || user.id }).lean();
+    extras.doctorId = doctorRecord ? String(doctorRecord._id) : null;
+    extras.specialization = doctorRecord?.specialization || '';
+    extras.weeklyAvailability = doctorRecord?.weeklyAvailability || defaultWeeklyAvailability();
+    extras.availability = doctorRecord?.availability || summarizeAvailability(doctorRecord?.weeklyAvailability);
   }
-  extras.features = await featuresForUser(user);
+  extras.features = await featuresForUser(user, { doctorRecord });
   extras.creditBalance = user.creditBalance ?? 0;
   if (!isAdmin(user)) {
     extras.subscription = await getActiveSubscription(user._id || user.id);

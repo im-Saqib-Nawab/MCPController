@@ -130,6 +130,9 @@ Create a `.env` file in the project root (see `.env.example`).
 | `REFRESH_TOKEN_TTL_SECONDS` | `2592000` | No | Optional (30 days) |
 | `MCP_SERVER_NAME` | `MCPController` | Yes | MCP server metadata |
 | `MCP_SERVER_VERSION` | `1.0.0` | Yes | MCP server metadata |
+| `METRICS_TOKEN` | long random string | **Secret** | Recommended in production — bearer token for `/metrics` |
+| `CSRF_ENABLED` | `true` | No | Disable only for debugging |
+| `TEST_CENTER_ENABLED` | `false` | No | Must stay `false` in production |
 
 **Never expose** `MONGODB_URI`, `ADMIN_PASSWORD`, or `JWT_SECRET` to the browser.
 
@@ -162,7 +165,7 @@ npm run build
 ## Vercel deployment
 
 1. Push to GitHub and import the repo in Vercel (Framework: Other).
-2. Set environment variables for Production (see table above). **`APP_URL` and `API_URL` must both be `https://mcpcontroller.vercel.app`** (or your custom domain).
+2. Set environment variables for Production (see table above). **`APP_URL` and `API_URL` must both be `https://mcpcontroller.vercel.app`** (or your custom domain). Required: `MONGODB_URI`, `JWT_SECRET`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `APP_URL`, `API_URL`. Recommended: `METRICS_TOKEN`.
 3. Deploy. `vercel.json` rewrites API, OAuth, MCP, and discovery routes to the serverless function and serves the React SPA for other paths.
 4. Seed MongoDB Atlas from your machine: `npm run seed` with `MONGODB_URI` pointing at Atlas.
 5. Log in with `ADMIN_EMAIL` / `ADMIN_PASSWORD`.

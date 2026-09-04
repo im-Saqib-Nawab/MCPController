@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import Button from '../components/Button.jsx';
 import PermissionCard from '../components/PermissionCard.jsx';
@@ -6,8 +6,21 @@ import AppointmentBadge from '../components/AppointmentBadge.jsx';
 import FeatureFlagPanel from '../components/FeatureFlagPanel.jsx';
 import { api, getErrorMessage } from '../services/api.js';
 
+const ACTIVE_REQUEST_STATUSES = ['REQUESTED', 'ALTERNATIVE_OFFERED', 'RESCHEDULED'];
+
+function computeStats(doctors, patients, appointments) {
+  const today = new Date().toISOString().slice(0, 10);
+  return {
+    doctors: doctors.length,
+    patients: patients.length,
+    pendingAppointments: appointments.filter((item) => ACTIVE_REQUEST_STATUSES.includes(item.status)).length,
+    todayAppointments: appointments.filter(
+      (item) => item.date === today && ['ACCEPTED', 'REQUESTED'].includes(item.status)
+    ).length
+  };
+}
+
 export default function AdminDashboard({ user }) {
-  const [stats, setStats] = useState(null);
   const [doctors, setDoctors] = useState([]);
   const [patients, setPatients] = useState([]);
   const [appointments, setAppointments] = useState([]);
@@ -21,18 +34,21 @@ export default function AdminDashboard({ user }) {
   const [editingDoctor, setEditingDoctor] = useState(null);
   const [editingPatient, setEditingPatient] = useState(null);
 
+  const stats = useMemo(
+    () => computeStats(doctors, patients, appointments),
+    [doctors, patients, appointments]
+  );
+
   const load = useCallback(async () => {
     setError('');
     try {
-      const [statsRes, doctorsRes, patientsRes, appointmentsRes, usersRes, connectionsRes] = await Promise.all([
-        api.get('/admin/stats'),
-        api.get('/doctors'),
+      const [doctorsRes, patientsRes, appointmentsRes, usersRes, connectionsRes] = await Promise.all([
+        api.get('/doctors', { params: { summary: true } }),
         api.get('/patients'),
         api.get('/appointments'),
         api.get('/admin/users'),
-        api.get('/connections')
+        api.get('/connections/admin/all')
       ]);
-      setStats(statsRes.data.stats);
       setDoctors(doctorsRes.data.doctors || []);
       setPatients(patientsRes.data.patients || []);
       setAppointments(appointmentsRes.data.appointments || []);
@@ -49,6 +65,31 @@ export default function AdminDashboard({ user }) {
     load();
   }, [load]);
 
+  async function reloadDoctors() {
+    const { data } = await api.get('/doctors', { params: { summary: true } });
+    setDoctors(data.doctors || []);
+  }
+
+  async function reloadPatients() {
+    const { data } = await api.get('/patients');
+    setPatients(data.patients || []);
+  }
+
+  async function reloadAppointments() {
+    const { data } = await api.get('/appointments');
+    setAppointments(data.appointments || []);
+  }
+
+  async function reloadUsers() {
+    const { data } = await api.get('/admin/users');
+    setUsers(data.users || []);
+  }
+
+  async function reloadConnections() {
+    const { data } = await api.get('/connections/admin/all');
+    setConnections(data.connections || []);
+  }
+
   async function createDoctor(event) {
     event.preventDefault();
     setError('');
@@ -56,7 +97,7 @@ export default function AdminDashboard({ user }) {
       await api.post('/doctors', doctorForm);
       setDoctorForm({ name: '', specialization: '', email: '', phone: '', password: '' });
       setSuccess('Doctor created.');
-      await load();
+      await reloadDoctors();
     } catch (err) {
       setError(getErrorMessage(err));
     }
@@ -69,7 +110,7 @@ export default function AdminDashboard({ user }) {
       await api.post('/patients', patientForm);
       setPatientForm({ name: '', email: '', password: '', phone: '' });
       setSuccess('Patient created.');
-      await load();
+      await reloadPatients();
     } catch (err) {
       setError(getErrorMessage(err));
     }
@@ -79,7 +120,7 @@ export default function AdminDashboard({ user }) {
     if (!window.confirm('Delete this doctor?')) return;
     try {
       await api.delete(`/doctors/${id}`);
-      await load();
+      setDoctors((current) => current.filter((doctor) => doctor.id !== id));
     } catch (err) {
       setError(getErrorMessage(err));
     }
@@ -89,7 +130,7 @@ export default function AdminDashboard({ user }) {
     if (!window.confirm('Delete this patient?')) return;
     try {
       await api.delete(`/patients/${id}`);
-      await load();
+      setPatients((current) => current.filter((patient) => patient.id !== id));
     } catch (err) {
       setError(getErrorMessage(err));
     }
@@ -99,15 +140,17 @@ export default function AdminDashboard({ user }) {
     event.preventDefault();
     if (!editingDoctor) return;
     try {
-      await api.patch(`/doctors/${editingDoctor.id}`, {
+      const { data } = await api.patch(`/doctors/${editingDoctor.id}`, {
         name: editingDoctor.name,
         specialization: editingDoctor.specialization,
         email: editingDoctor.email,
         phone: editingDoctor.phone
       });
+      setDoctors((current) =>
+        current.map((doctor) => (doctor.id === editingDoctor.id ? { ...doctor, ...data.doctor } : doctor))
+      );
       setEditingDoctor(null);
       setSuccess('Doctor updated.');
-      await load();
     } catch (err) {
       setError(getErrorMessage(err));
     }
@@ -117,15 +160,17 @@ export default function AdminDashboard({ user }) {
     event.preventDefault();
     if (!editingPatient) return;
     try {
-      await api.patch(`/patients/${editingPatient.id}`, {
+      const { data } = await api.patch(`/patients/${editingPatient.id}`, {
         name: editingPatient.name,
         phone: editingPatient.phone,
         age: editingPatient.age === '' ? null : Number(editingPatient.age),
         gender: editingPatient.gender
       });
+      setPatients((current) =>
+        current.map((patient) => (patient.id === editingPatient.id ? { ...patient, ...data.patient } : patient))
+      );
       setEditingPatient(null);
       setSuccess('Patient updated.');
-      await load();
     } catch (err) {
       setError(getErrorMessage(err));
     }
@@ -136,7 +181,7 @@ export default function AdminDashboard({ user }) {
     try {
       await api.delete(`/connections/${encodeURIComponent(clientId)}`);
       setSuccess('Connection revoked.');
-      await load();
+      await reloadConnections();
     } catch (err) {
       setError(getErrorMessage(err));
     }
@@ -145,7 +190,7 @@ export default function AdminDashboard({ user }) {
   async function changeAppointment(id, action) {
     try {
       await api.post(`/appointments/${id}/${action}`);
-      await load();
+      await reloadAppointments();
     } catch (err) {
       setError(getErrorMessage(err));
     }
@@ -157,7 +202,7 @@ export default function AdminDashboard({ user }) {
       setSuccess(
         `Updated permissions for ${target.email}. Log tools update immediately. Other MCP tools may require reconnecting ChatGPT.`
       );
-      await load();
+      await reloadUsers();
     } catch (err) {
       setError(getErrorMessage(err));
     }
@@ -203,10 +248,10 @@ export default function AdminDashboard({ user }) {
 
       <section className="mt-8 grid gap-4 sm:grid-cols-4">
         {[
-          ['Doctors', stats?.doctors],
-          ['Patients', stats?.patients],
-          ['Pending requests', stats?.pendingAppointments],
-          ["Today's appointments", stats?.todayAppointments]
+          ['Doctors', stats.doctors],
+          ['Patients', stats.patients],
+          ['Pending requests', stats.pendingAppointments],
+          ["Today's appointments", stats.todayAppointments]
         ].map(([label, value]) => (
           <article key={label} className="rounded-xl border border-slate-200 bg-white p-4">
             <p className="text-sm text-slate-500">{label}</p>

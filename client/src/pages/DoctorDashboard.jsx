@@ -1,14 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import Button from '../components/Button.jsx';
 import AppointmentBadge from '../components/AppointmentBadge.jsx';
-import MedicineManager from '../components/MedicineManager.jsx';
 import { WeeklyEditor } from '../components/AvailabilityGrid.jsx';
 import { STATUS_META, weekdayLabel } from '../lib/status.js';
 import { api, getErrorMessage } from '../services/api.js';
 import CreditBalanceCard from '../components/CreditBalanceCard.jsx';
 
+const MedicineManager = lazy(() => import('../components/MedicineManager.jsx'));
+
 export default function DoctorDashboard({ user }) {
-  const [doctor, setDoctor] = useState(null);
   const [appointments, setAppointments] = useState([]);
   const [weekly, setWeekly] = useState(user.weeklyAvailability || {});
   const [error, setError] = useState('');
@@ -20,21 +20,14 @@ export default function DoctorDashboard({ user }) {
   const load = useCallback(async () => {
     setError('');
     try {
-      const [appointmentsRes, doctorRes] = await Promise.all([
-        api.get('/appointments'),
-        user.doctorId ? api.get(`/doctors/${user.doctorId}`) : Promise.resolve({ data: { doctor: null } })
-      ]);
+      const appointmentsRes = await api.get('/appointments');
       setAppointments(appointmentsRes.data.appointments || []);
-      if (doctorRes.data.doctor) {
-        setDoctor(doctorRes.data.doctor);
-        setWeekly(doctorRes.data.doctor.weeklyAvailability);
-      }
     } catch (err) {
       setError(getErrorMessage(err));
     } finally {
       setLoading(false);
     }
-  }, [user.doctorId]);
+  }, []);
 
   useEffect(() => {
     load();
@@ -62,9 +55,9 @@ export default function DoctorDashboard({ user }) {
   async function saveAvailability() {
     if (!user.doctorId) return;
     try {
-      await api.patch(`/doctors/${user.doctorId}/availability`, { weeklyAvailability: weekly });
+      const { data } = await api.patch(`/doctors/${user.doctorId}/availability`, { weeklyAvailability: weekly });
+      setWeekly(data.doctor.weeklyAvailability);
       setSuccess('Availability updated.');
-      await load();
     } catch (err) {
       setError(getErrorMessage(err));
     }
@@ -88,7 +81,7 @@ export default function DoctorDashboard({ user }) {
   return (
     <main className="mx-auto max-w-5xl px-4 py-10">
       <h1 className="text-3xl font-semibold text-slate-900">Doctor dashboard</h1>
-      <p className="mt-2 text-slate-600">{user.name} · {doctor?.specialization || user.specialization}</p>
+      <p className="mt-2 text-slate-600">{user.name} · {user.specialization}</p>
 
       {error ? <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
       {success ? <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{success}</div> : null}
@@ -118,7 +111,9 @@ export default function DoctorDashboard({ user }) {
             Add medicines your patients can read, with common uses and simple care tips for minor situations.
           </p>
           <div className="mt-4">
-            <MedicineManager />
+            <Suspense fallback={<p className="text-sm text-slate-500">Loading medicines…</p>}>
+              <MedicineManager />
+            </Suspense>
           </div>
         </section>
       ) : null}

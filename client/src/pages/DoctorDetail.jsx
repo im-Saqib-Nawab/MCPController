@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import Button from '../components/Button.jsx';
 import AvailabilityGrid from '../components/AvailabilityGrid.jsx';
@@ -16,31 +16,32 @@ export default function DoctorDetail({ user }) {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
-  async function load() {
-    const { data } = await api.get(`/doctors/${doctorId}`);
-    setDoctor(data.doctor);
-
+  const load = useCallback(async () => {
     const canTryMedicines = Boolean(user?.features?.medicine_health_tips?.canView);
+    const requests = [api.get(`/doctors/${doctorId}`)];
     if (canTryMedicines) {
-      try {
-        const medicinesRes = await api.get('/medicines', { params: { doctorId } });
-        setMedicines(medicinesRes.data.medicines || []);
-        setMedicinesAvailable(true);
-      } catch {
-        setMedicines([]);
-        setMedicinesAvailable(false);
-      }
+      requests.push(
+        api.get('/medicines', { params: { doctorId } }).catch(() => ({ data: { medicines: [] } }))
+      );
+    }
+
+    const [doctorRes, medicinesRes] = await Promise.all(requests);
+    setDoctor(doctorRes.data.doctor);
+
+    if (canTryMedicines && medicinesRes) {
+      setMedicines(medicinesRes.data.medicines || []);
+      setMedicinesAvailable(true);
     } else {
       setMedicines([]);
       setMedicinesAvailable(false);
     }
-  }
+  }, [doctorId, user?.features?.medicine_health_tips?.canView]);
 
   useEffect(() => {
     load()
       .catch((err) => setError(getErrorMessage(err)))
       .finally(() => setLoading(false));
-  }, [doctorId]);
+  }, [load]);
 
   async function book() {
     if (!selectedDate) {

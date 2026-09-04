@@ -11,7 +11,7 @@ export default function Doctors() {
 
   useEffect(() => {
     api
-      .get('/doctors')
+      .get('/doctors', { params: { summary: true } })
       .then(({ data }) => setDoctors(data.doctors || []))
       .catch((err) => setError(getErrorMessage(err)))
       .finally(() => setLoading(false));

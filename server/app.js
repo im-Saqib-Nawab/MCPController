@@ -8,7 +8,7 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 
 import { connectDatabase, pingDatabase } from './config/database.js';
-import { config } from './config/env.js';
+import { config, deploymentConfigErrors } from './config/env.js';
 import { createMongoRateLimitOptions } from './lib/mongo-rate-limit-store.js';
 import { metricsHandler } from './routes/metrics.routes.js';
 
@@ -226,6 +226,15 @@ app.get('/health', (_req, res) => {
 });
 
 app.get('/api/health', (_req, res) => {
+  if (deploymentConfigErrors.length) {
+    return res.status(503).json({
+      ok: false,
+      name: config.mcpServerName,
+      version: config.mcpServerVersion,
+      configErrors: deploymentConfigErrors
+    });
+  }
+
   res.status(200).json({
     ok: true,
     name: config.mcpServerName,
@@ -261,6 +270,31 @@ app.get('/api/health/ready', async (_req, res) => {
 
 app.get('/metrics', metricsHandler);
 app.get('/api/metrics', metricsHandler);
+
+/* -------------------------------------------------------------------------- */
+/* Deployment configuration guard                                              */
+/* -------------------------------------------------------------------------- */
+
+function isConfigDiagnosticRoute(pathname) {
+  return (
+    pathname === '/health/live' ||
+    pathname === '/api/health/live' ||
+    pathname === '/health' ||
+    pathname === '/api/health'
+  );
+}
+
+app.use((req, res, next) => {
+  if (!deploymentConfigErrors.length || isConfigDiagnosticRoute(req.path)) {
+    return next();
+  }
+
+  return res.status(503).json({
+    error: 'misconfigured',
+    message: deploymentConfigErrors[0],
+    configErrors: deploymentConfigErrors
+  });
+});
 
 /* -------------------------------------------------------------------------- */
 /* Database Middleware (Runs before all routes)                                */

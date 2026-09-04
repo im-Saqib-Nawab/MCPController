@@ -13,6 +13,14 @@ import {
   normalizeWeeklyAvailability
 } from '../lib/availability.js';
 import { getDoctorByUserId, serializeDoctor } from './doctor.service.js';
+
+function serializeDoctorBrief(doctor) {
+  return {
+    id: String(doctor._id),
+    name: doctor.name,
+    specialization: doctor.specialization
+  };
+}
 import { paginateQuery } from '../lib/pagination.js';
 import { withOptionalTransaction } from '../lib/transactions.js';
 
@@ -78,7 +86,7 @@ function serializeAppointmentRow(appointment, patientMap, doctorMap) {
           phone: patient.phone || ''
         }
       : null,
-    doctor: doctor ? serializeDoctor(doctor) : null
+    doctor: doctor ? serializeDoctorBrief(doctor) : null
   };
 }
 
@@ -145,11 +153,12 @@ export async function listDoctorAppointmentRequests(actor, filters = {}) {
 export async function listAppointments(actor, filters = {}) {
   const { page, limit, status, doctorId, patientId, date } = filters;
   const query = {};
-  const doctor = await actorDoctor(actor);
+  let doctor = null;
 
   if (isPatient(actor) && !isAdmin(actor)) {
     query.patientId = userId(actor);
   } else if (isDoctor(actor) && !isAdmin(actor)) {
+    doctor = await actorDoctor(actor);
     if (!doctor) {
       throw new AppError(404, 'not_found', 'Doctor profile not found.');
     }

@@ -15,9 +15,12 @@ export default function PatientDashboard({ user }) {
 
   const load = useCallback(async () => {
     try {
-      const [appointmentsRes, doctorsRes] = await Promise.all([api.get('/appointments'), api.get('/doctors')]);
+      const [appointmentsRes, doctorsRes] = await Promise.all([
+        api.get('/appointments'),
+        api.get('/doctors', { params: { limit: 4, summary: true } })
+      ]);
       setAppointments(appointmentsRes.data.appointments || []);
-      setDoctors((doctorsRes.data.doctors || []).slice(0, 4));
+      setDoctors(doctorsRes.data.doctors || []);
     } catch (err) {
       setError(getErrorMessage(err));
     } finally {

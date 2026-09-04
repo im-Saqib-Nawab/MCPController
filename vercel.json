@@ -1,27 +1,18 @@
 {
-  "installCommand": "npm install --include=dev",
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "installCommand": "npm ci --include=dev",
   "buildCommand": "npm run build",
   "outputDirectory": "client/dist",
   "rewrites": [
-    { "source": "/api/:path*", "destination": "/api" },
-    { "source": "/oauth/authorize", "destination": "/api" },
-    { "source": "/oauth/authorize/", "destination": "/api" },
-    { "source": "/oauth/token", "destination": "/api" },
-    { "source": "/oauth/token/", "destination": "/api" },
-    { "source": "/oauth/register", "destination": "/api" },
-    { "source": "/oauth/register/", "destination": "/api" },
-    { "source": "/oauth/revoke", "destination": "/api" },
-    { "source": "/oauth/revoke/", "destination": "/api" },
-    { "source": "/mcp", "destination": "/api" },
-    { "source": "/mcp/", "destination": "/api" },
-    { "source": "/.well-known/:path*", "destination": "/api" },
-    { "source": "/health", "destination": "/api" },
-    { "source": "/((?!assets/|api(?:/|$)|oauth(?:/|$)|mcp(?:/|$)|\\.well-known(?:/|$)|health(?:/|$)).*)", "destination": "/index.html" }
+    {
+      "source": "/((?!assets/|api(?:/|$)|oauth(?:/|$)|mcp(?:/|$)|\\.well-known(?:/|$)|health(?:/|$)).*)",
+      "destination": "/index.html"
+    }
   ],
   "functions": {
-    "api/index.js": {
-      "includeFiles": "client/dist/**",
-      "maxDuration": 60
+    "index.js": {
+      "maxDuration": 60,
+      "memory": 1024
     }
   }
 }
