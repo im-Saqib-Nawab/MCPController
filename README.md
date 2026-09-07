@@ -1,6 +1,6 @@
 # MCPController
 
-MCPController is a single-deploy doctor–patient appointment application with a React frontend, Express API, OAuth 2.1 authorization server, and MCP server — all served from one origin (for example `https://mcpcontroller.vercel.app`).
+MCPController  is the and  a single-deploy doctor–patient appointment application with a React frontend, Express API, OAuth 2.1 authorization server, and MCP server — all served from one origin (for example `https://mcpcontroller.vercel.app`).
 
 Patients book available days. Doctors accept one patient per day and can offer another date. Administrators manage the system. ChatGPT connects through OAuth with PKCE. Every MCP tool checks the caller’s role, ownership, and granted scopes.
 
