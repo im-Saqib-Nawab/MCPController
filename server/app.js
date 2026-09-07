@@ -14,6 +14,7 @@ import { metricsHandler } from './routes/metrics.routes.js';
 
 import authRoutes from './routes/auth.routes.js';
 import adminRoutes from './routes/admin.routes.js';
+import deploymentRoutes from './routes/deployment.routes.js';
 import connectionRoutes from './routes/connection.routes.js';
 import doctorRoutes from './routes/doctor.routes.js';
 import patientRoutes from './routes/patient.routes.js';
@@ -33,6 +34,10 @@ import {
 
 import { errorMiddleware, AppError } from './middleware/error.middleware.js';
 import { requestLogMiddleware } from './middleware/request-log.middleware.js';
+import {
+  canaryRouterMiddleware,
+  deploymentResponseHeadersMiddleware
+} from './middleware/canary-router.middleware.js';
 import { csrfProtection } from './middleware/csrf.middleware.js';
 import { shouldSkipRateLimit } from './lib/rate-limit-policy.js';
 
@@ -218,7 +223,10 @@ function livenessPayload() {
     ok: true,
     service: config.mcpServerName,
     version: config.mcpServerVersion,
-    environment: config.nodeEnv
+    environment: config.nodeEnv,
+    deploymentVersion: config.deploymentVersion,
+    deploymentRole: config.deploymentRole,
+    isDeploymentRouter: config.isDeploymentRouter
   };
 }
 
@@ -251,7 +259,10 @@ app.get('/api/health', (_req, res) => {
   res.status(200).json({
     ok: true,
     name: config.mcpServerName,
-    version: config.mcpServerVersion
+    version: config.mcpServerVersion,
+    deploymentVersion: config.deploymentVersion,
+    deploymentRole: config.deploymentRole,
+    isDeploymentRouter: config.isDeploymentRouter
   });
 });
 
@@ -344,6 +355,18 @@ app.use(async (req, _res, next) => {
     );
   }
 });
+
+/* -------------------------------------------------------------------------- */
+/* Deployment control plane (router only, never proxied)                       */
+/* -------------------------------------------------------------------------- */
+
+app.use('/api/admin/deployment', deploymentRoutes);
+
+/* -------------------------------------------------------------------------- */
+/* Canary traffic router (production entrypoint only)                          */
+/* -------------------------------------------------------------------------- */
+
+app.use(canaryRouterMiddleware());
 
 /* -------------------------------------------------------------------------- */
 /* OAuth / MCP Discovery Endpoints                                            */
@@ -462,6 +485,7 @@ app.use((req, res) => {
 });
 
 /* Central Error Handler */
+app.use(deploymentResponseHeadersMiddleware);
 app.use(errorMiddleware);
 
 export default app;

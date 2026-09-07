@@ -74,12 +74,44 @@ export function assertDeployedEnvironment() {
   }
 }
 
+function parseAllowlist(value, fallback) {
+  const raw = String(value || fallback || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  return raw.length ? raw : fallback;
+}
+
+const deploymentRole = String(process.env.DEPLOYMENT_ROLE || '').trim().toLowerCase();
+const explicitRouterFlag = process.env.IS_DEPLOYMENT_ROUTER;
+const vercelEnv = String(process.env.VERCEL_ENV || '').trim().toLowerCase();
+const inferredRouterRole =
+  deploymentRole === 'router' || deploymentRole === 'production' || deploymentRole === 'control-plane';
+const inferredCanaryRole = deploymentRole === 'canary' || deploymentRole === 'preview' || deploymentRole === 'target';
+const isPreviewDeployment = vercelEnv === 'preview';
+const isDeploymentRouter =
+  explicitRouterFlag === 'true'
+    ? true
+    : explicitRouterFlag === 'false' || inferredCanaryRole || isPreviewDeployment
+      ? false
+      : inferredRouterRole || isProduction || isStaging || isDevelopment || isTest;
+
 export const config = {
   nodeEnv,
   isDevelopment,
   isStaging,
   isProduction,
   isTest,
+  deploymentRole: deploymentRole || (isDeploymentRouter ? 'router' : 'canary'),
+  isDeploymentRouter,
+  deploymentVersion:
+    process.env.DEPLOYMENT_VERSION?.trim() ||
+    process.env.VERCEL_GIT_COMMIT_SHA?.trim()?.slice(0, 12) ||
+    process.env.VERCEL_GIT_COMMIT_REF?.trim()?.slice(0, 40) ||
+    (isProduction ? 'production' : 'local'),
+  canaryUrlAllowlist: parseAllowlist(process.env.CANARY_URL_ALLOWLIST, ['*.vercel.app']),
+  deploymentRolloutCacheTtlMs: Number(process.env.DEPLOYMENT_ROLLOUT_CACHE_TTL_MS) || 5000,
   port: Number(process.env.PORT) || 3000,
   appUrl: (process.env.APP_URL || 'http://localhost:5173').replace(/\/$/, ''),
   apiUrl: (process.env.API_URL || process.env.APP_URL || 'http://localhost:3000').replace(/\/$/, ''),

@@ -76,14 +76,17 @@ export function requestLogMiddleware(req, res, next) {
         durationMs
       });
 
-      logOperation(level, 'http.request.completed', {
-        method: req.method,
-        route: req.path,
-        routeKind,
-        statusCode: res.statusCode,
-        durationMs,
-        ...actorFromRequest(req)
-      });
+    logOperation(level, 'http.request.completed', {
+      method: req.method,
+      route: req.path,
+      routeKind,
+      statusCode: res.statusCode,
+      durationMs,
+      deploymentVersion: res.getHeader('x-deployment-version') || undefined,
+      servedBy: res.getHeader('x-served-by') || undefined,
+      rolloutAssignment: res.getHeader('x-rollout-assignment') || req.deploymentAssignment || undefined,
+      ...actorFromRequest(req)
+    });
     });
 
     next();

@@ -34,11 +34,34 @@ export async function requireUser(req, res, next) {
   }
 }
 
+export function isSuperAdminEmail(email) {
+  return (
+    Boolean(email) &&
+    String(email).trim().toLowerCase() === String(config.adminEmail).trim().toLowerCase()
+  );
+}
+
 export function requireAdmin(req, res, next) {
   requireUser(req, res, (err) => {
     if (err) return next(err);
     if (req.user?.role !== 'admin') {
       return next(new AppError(403, 'forbidden', 'Administrator access required.'));
+    }
+    next();
+  });
+}
+
+export function requireSuperAdmin(req, res, next) {
+  requireAdmin(req, res, (err) => {
+    if (err) return next(err);
+    if (!isSuperAdminEmail(req.user?.email)) {
+      return next(
+        new AppError(
+          403,
+          'forbidden',
+          'Only the primary administrator can manage deployment routing.'
+        )
+      );
     }
     next();
   });

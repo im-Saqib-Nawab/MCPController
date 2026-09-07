@@ -22,6 +22,7 @@ import { api } from './services/api.js';
 const TestingCenter = lazy(() => import('./pages/TestingCenter.jsx'));
 const Observability = lazy(() => import('./pages/Observability.jsx'));
 const AdminCreditsPage = lazy(() => import('./pages/AdminCreditsPage.jsx'));
+const DeploymentControl = lazy(() => import('./pages/DeploymentControl.jsx'));
 
 function PageFallback() {
   return <div className="px-4 py-16 text-center text-sm text-slate-500">Loading…</div>;
@@ -152,6 +153,16 @@ export default function App() {
             <AdminRoute user={user} loading={loading}>
               <Suspense fallback={<PageFallback />}>
                 <AdminCreditsPage />
+              </Suspense>
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="/admin/deployment"
+          element={
+            <AdminRoute user={user} loading={loading}>
+              <Suspense fallback={<PageFallback />}>
+                <DeploymentControl user={user} />
               </Suspense>
             </AdminRoute>
           }

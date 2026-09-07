@@ -19,7 +19,7 @@
     { "source": "/health", "destination": "/api" },
     {
       "source": "/((?!assets/|api(?:/|$)|oauth(?:/|$)|mcp(?:/|$)|\\.well-known(?:/|$)|health(?:/|$)).*)",
-      "destination": "/index.html"
+      "destination": "/api"
     }
   ],
   "functions": {

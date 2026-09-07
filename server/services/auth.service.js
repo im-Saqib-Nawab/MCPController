@@ -4,6 +4,7 @@ import { Doctor } from '../models/Doctor.js';
 import { config } from '../config/env.js';
 import { AppError } from '../middleware/error.middleware.js';
 import { isAdmin, normalizeRole, publicRole, ROLES } from '../lib/roles.js';
+import { isSuperAdminEmail } from '../middleware/auth.middleware.js';
 import { defaultWeeklyAvailability, summarizeAvailability } from '../lib/availability.js';
 import { defaultScopesForRole } from './permission.service.js';
 import { revokeUserTokens } from './token.service.js';
@@ -91,6 +92,7 @@ export async function serializeUserWithProfile(user) {
   }
   extras.features = await featuresForUser(user, { doctorRecord });
   extras.creditBalance = user.creditBalance ?? 0;
+  extras.isSuperAdmin = isSuperAdminEmail(user.email);
   if (!isAdmin(user)) {
     extras.subscription = await getActiveSubscription(user._id || user.id);
   }

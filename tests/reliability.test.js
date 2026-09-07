@@ -63,7 +63,8 @@ test('metrics endpoint exposes runtime counters', async () => {
 test('routine HTTP logs are not persisted while audit logs are', async () => {
   const { SystemLog } = await import('../server/models/SystemLog.js');
   const { flushLogQueue } = await import('../server/services/log-store.service.js');
-  const before = await SystemLog.countDocuments({ category: 'audit' });
+  const beforeAudit = await SystemLog.countDocuments({ category: 'audit' });
+  const beforeHttp = await SystemLog.countDocuments({ operation: 'http.request.completed' });
 
   const agent = request.agent(app);
   await agent.post('/api/auth/login').send({
@@ -75,8 +76,8 @@ test('routine HTTP logs are not persisted while audit logs are', async () => {
   const httpLogs = await SystemLog.countDocuments({ operation: 'http.request.completed' });
   const auditLogs = await SystemLog.countDocuments({ category: 'audit' });
 
-  assert.equal(httpLogs, 0);
-  assert.ok(auditLogs >= before + 1);
+  assert.equal(httpLogs, beforeHttp);
+  assert.ok(auditLogs >= beforeAudit + 1);
 });
 
 test('appointments list avoids per-row patient and doctor lookups', async () => {

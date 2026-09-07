@@ -1,5 +1,17 @@
+import { createRequire } from 'node:module';
 import pino from 'pino';
 import { config } from '../config/env.js';
+
+const require = createRequire(import.meta.url);
+
+function hasPinoPretty() {
+  try {
+    require.resolve('pino-pretty');
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 const REDACT_PATHS = [
   'req.headers.authorization',
@@ -46,7 +58,7 @@ function buildLoggerOptions() {
     return { ...base, level: 'silent' };
   }
 
-  if (!config.isProduction) {
+  if (!config.isProduction && hasPinoPretty()) {
     return {
       ...base,
       transport: {
