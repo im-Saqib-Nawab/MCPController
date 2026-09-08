@@ -81,6 +81,10 @@ export function getErrorMessage(error) {
     return apiMessage;
   }
 
+  if (error?.response?.data?.error === 'use_public_entrypoint' && error?.response?.data?.publicUrl) {
+    return `Use ${error.response.data.publicUrl} instead of this preview URL.`;
+  }
+
   if (error?.message) {
     return error.message;
   }

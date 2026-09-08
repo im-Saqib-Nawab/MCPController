@@ -10,6 +10,7 @@ import { AppError } from '../middleware/error.middleware.js';
 import { logAudit } from '../lib/audit-log.js';
 import { validateCanaryDeploymentUrl, normalizeVersionIdentifier } from '../lib/deployment-url.js';
 import { rolloutBucket } from '../lib/deployment-assignment.js';
+import { isDeploymentControlPlane } from '../lib/deployment-routing.js';
 import { getRuntimeMetricsSnapshot } from '../lib/runtime-metrics.js';
 
 const rolloutCache = {
@@ -150,7 +151,11 @@ async function saveRollout(doc, adminUser, action, requestId) {
   return next;
 }
 
-function assertRouterControlPlane() {
+function assertRouterControlPlane(req) {
+  if (req && isDeploymentControlPlane(req)) {
+    return;
+  }
+
   if (!config.isDeploymentRouter) {
     throw new AppError(
       403,
@@ -272,10 +277,11 @@ function assertCanaryReady(doc) {
   }
 }
 
-export async function getDeploymentOverview() {
+export async function getDeploymentOverview(req) {
   const rollout = await getRolloutConfig({ fresh: true });
   const traffic = await buildTrafficStats(rollout);
   const canaryPct = rollout.rolloutEnabled ? rollout.canaryPercentage : 0;
+  const canManageFromHere = req ? isDeploymentControlPlane(req) : config.isDeploymentRouter;
 
   const [productionHealth, canaryHealth] = await Promise.all([
     probeDeploymentHealth(config.apiUrl),
@@ -298,7 +304,7 @@ export async function getDeploymentOverview() {
       publicUrl: config.apiUrl,
       isRouter: config.isDeploymentRouter,
       currentHost: process.env.VERCEL_URL || '',
-      canManageFromHere: config.isDeploymentRouter
+      canManageFromHere
     },
     assignmentPreview: buildAssignmentPreview(rollout),
     traffic,
@@ -343,8 +349,8 @@ function buildAssignmentPreview(rollout) {
   };
 }
 
-export async function updateCanaryTarget({ canaryDeploymentUrl, canaryVersion, adminUser, requestId }) {
-  assertRouterControlPlane();
+export async function updateCanaryTarget({ canaryDeploymentUrl, canaryVersion, adminUser, requestId, req }) {
+  assertRouterControlPlane(req);
 
   const doc = await loadMutableRollout();
   let normalizedUrl;
@@ -376,8 +382,8 @@ export async function updateCanaryTarget({ canaryDeploymentUrl, canaryVersion, a
   return saveRollout(doc, adminUser, 'set_canary_target', requestId);
 }
 
-export async function setRolloutPercentage({ percentage, adminUser, requestId }) {
-  assertRouterControlPlane();
+export async function setRolloutPercentage({ percentage, adminUser, requestId, req }) {
+  assertRouterControlPlane(req);
 
   const pct = assertPercentage(percentage);
   const doc = await loadMutableRollout();
@@ -399,8 +405,8 @@ export async function setRolloutPercentage({ percentage, adminUser, requestId })
   return saveRollout(doc, adminUser, 'set_percentage', requestId);
 }
 
-export async function setRolloutEnabled({ enabled, adminUser, requestId }) {
-  assertRouterControlPlane();
+export async function setRolloutEnabled({ enabled, adminUser, requestId, req }) {
+  assertRouterControlPlane(req);
 
   const doc = await loadMutableRollout();
 
@@ -419,8 +425,8 @@ export async function setRolloutEnabled({ enabled, adminUser, requestId }) {
   return saveRollout(doc, adminUser, enabled ? 'enable_rollout' : 'disable_rollout', requestId);
 }
 
-export async function rollbackRollout({ adminUser, requestId }) {
-  assertRouterControlPlane();
+export async function rollbackRollout({ adminUser, requestId, req }) {
+  assertRouterControlPlane(req);
 
   const doc = await loadMutableRollout();
   doc.canaryPercentage = 0;
@@ -431,8 +437,8 @@ export async function rollbackRollout({ adminUser, requestId }) {
   return saveRollout(doc, adminUser, 'rollback', requestId);
 }
 
-export async function promoteCanary({ adminUser, requestId }) {
-  assertRouterControlPlane();
+export async function promoteCanary({ adminUser, requestId, req }) {
+  assertRouterControlPlane(req);
 
   const doc = await loadMutableRollout();
   assertCanaryReady(doc);
@@ -454,8 +460,8 @@ export async function promoteCanary({ adminUser, requestId }) {
   };
 }
 
-export async function syncProductionVersion({ productionVersion, adminUser, requestId }) {
-  assertRouterControlPlane();
+export async function syncProductionVersion({ productionVersion, adminUser, requestId, req }) {
+  assertRouterControlPlane(req);
 
   const doc = await loadMutableRollout();
   doc.productionVersion = normalizeVersionIdentifier(productionVersion, config.deploymentVersion);
@@ -503,8 +509,8 @@ function normalizeManagerEmail(email) {
   return String(email || '').trim().toLowerCase();
 }
 
-export async function grantDeploymentManager({ email, adminUser, requestId }) {
-  assertRouterControlPlane();
+export async function grantDeploymentManager({ email, adminUser, requestId, req }) {
+  assertRouterControlPlane(req);
 
   const normalized = normalizeManagerEmail(email);
   if (!normalized) {
@@ -527,8 +533,8 @@ export async function grantDeploymentManager({ email, adminUser, requestId }) {
   return saveRollout(doc, adminUser, 'grant_deployment_manager', requestId);
 }
 
-export async function revokeDeploymentManager({ email, adminUser, requestId }) {
-  assertRouterControlPlane();
+export async function revokeDeploymentManager({ email, adminUser, requestId, req }) {
+  assertRouterControlPlane(req);
 
   const normalized = normalizeManagerEmail(email);
   if (!normalized) {

@@ -3,6 +3,7 @@ import { User } from '../models/User.js';
 import { config } from '../config/env.js';
 import { AppError } from './error.middleware.js';
 import { canManageDeployment, getRolloutConfig } from '../services/deployment.service.js';
+import { isDeploymentControlPlane } from '../lib/deployment-routing.js';
 
 export async function requireUser(req, res, next) {
   try {
@@ -73,7 +74,7 @@ export function requireDeploymentManager(req, res, next) {
     if (err) return next(err);
 
     try {
-      if (!config.isDeploymentRouter) {
+      if (!isDeploymentControlPlane(req)) {
         return next(
           new AppError(
             403,

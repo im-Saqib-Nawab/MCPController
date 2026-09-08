@@ -3,6 +3,7 @@ import { pipeline } from 'node:stream/promises';
 
 import { config } from '../config/env.js';
 import { logOperation } from './request-context.js';
+import { isRouterExcludedPath } from './deployment-routing.js';
 
 const HOP_BY_HOP_HEADERS = new Set([
   'connection',
@@ -199,45 +200,7 @@ export async function proxyRequestToCanary(req, res, { canaryDeploymentUrl, cana
   return true;
 }
 
-function isAuthBootstrapPath(pathname = '') {
-  return (
-    pathname === '/api/auth/login' ||
-    pathname === '/api/auth/register'
-  );
-}
-
-function isAdminControlPath(pathname = '') {
-  return pathname === '/api/admin' || pathname.startsWith('/api/admin/');
-}
-
-function isHealthOrMetricsPath(pathname = '') {
-  return (
-    pathname === '/health' ||
-    pathname === '/health/live' ||
-    pathname === '/health/ready' ||
-    pathname === '/metrics' ||
-    pathname === '/api/health' ||
-    pathname === '/api/health/live' ||
-    pathname === '/api/health/ready' ||
-    pathname === '/api/metrics'
-  );
-}
-
-export function isRouterExcludedPath(pathname = '') {
-  if (
-    isHealthOrMetricsPath(pathname) ||
-    isAuthBootstrapPath(pathname) ||
-    isAdminControlPath(pathname)
-  ) {
-    return true;
-  }
-
-  if (pathname.startsWith('/.well-known/')) {
-    return true;
-  }
-
-  return false;
-}
+export { isRouterExcludedPath, isCanaryProxyPath } from './deployment-routing.js';
 
 function rewriteLocationHeader(location, canaryDeploymentUrl) {
   const value = String(location || '').trim();

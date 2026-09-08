@@ -263,7 +263,8 @@ app.get('/api/health', (_req, res) => {
     version: config.mcpServerVersion,
     deploymentVersion: config.deploymentVersion,
     deploymentRole: config.deploymentRole,
-    isDeploymentRouter: config.isDeploymentRouter
+    isDeploymentRouter: config.isDeploymentRouter,
+    publicUrl: config.apiUrl
   });
 });
 

@@ -31,7 +31,7 @@ function parseOrThrow(schema, data) {
 
 export async function overview(req, res, next) {
   try {
-    const data = await deploymentService.getDeploymentOverview();
+    const data = await deploymentService.getDeploymentOverview(req);
     const canManage = deploymentService.canManageDeployment(req.user?.email, data.rollout);
     res.json({
       ...data,
@@ -63,7 +63,8 @@ export async function setPercentage(req, res, next) {
     const rollout = await deploymentService.setRolloutPercentage({
       percentage: parsed.percentage,
       adminUser: req.user,
-      requestId: req.requestId
+      requestId: req.requestId,
+      req
     });
     res.json({ rollout });
   } catch (err) {
@@ -78,7 +79,8 @@ export async function setCanaryTarget(req, res, next) {
       canaryDeploymentUrl: parsed.canaryDeploymentUrl,
       canaryVersion: parsed.canaryVersion,
       adminUser: req.user,
-      requestId: req.requestId
+      requestId: req.requestId,
+      req
     });
     res.json({ rollout });
   } catch (err) {
@@ -92,7 +94,8 @@ export async function setEnabled(req, res, next) {
     const rollout = await deploymentService.setRolloutEnabled({
       enabled: parsed.enabled,
       adminUser: req.user,
-      requestId: req.requestId
+      requestId: req.requestId,
+      req
     });
     res.json({ rollout });
   } catch (err) {
@@ -104,7 +107,8 @@ export async function rollback(req, res, next) {
   try {
     const rollout = await deploymentService.rollbackRollout({
       adminUser: req.user,
-      requestId: req.requestId
+      requestId: req.requestId,
+      req
     });
     res.json({ rollout });
   } catch (err) {
@@ -116,7 +120,8 @@ export async function promote(req, res, next) {
   try {
     const rollout = await deploymentService.promoteCanary({
       adminUser: req.user,
-      requestId: req.requestId
+      requestId: req.requestId,
+      req
     });
     res.json({ rollout });
   } catch (err) {
@@ -129,7 +134,8 @@ export async function syncProductionVersion(req, res, next) {
     const rollout = await deploymentService.syncProductionVersion({
       productionVersion: req.body?.productionVersion,
       adminUser: req.user,
-      requestId: req.requestId
+      requestId: req.requestId,
+      req
     });
     res.json({ rollout });
   } catch (err) {
@@ -143,7 +149,8 @@ export async function grantManager(req, res, next) {
     const rollout = await deploymentService.grantDeploymentManager({
       email: parsed.email,
       adminUser: req.user,
-      requestId: req.requestId
+      requestId: req.requestId,
+      req
     });
     res.json({ rollout });
   } catch (err) {
@@ -157,7 +164,8 @@ export async function revokeManager(req, res, next) {
     const rollout = await deploymentService.revokeDeploymentManager({
       email: parsed.email,
       adminUser: req.user,
-      requestId: req.requestId
+      requestId: req.requestId,
+      req
     });
     res.json({ rollout });
   } catch (err) {

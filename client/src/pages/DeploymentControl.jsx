@@ -188,7 +188,7 @@ export default function DeploymentControl({ user }) {
 
       {!router.canManageFromHere ? (
         <div className="mb-6 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
-          You can monitor deployment status here, but rollout changes must be made from the production router at{' '}
+          You are viewing deployment status from a preview deployment. Rollout changes must be made from{' '}
           <a className="font-medium underline" href={`${router.publicUrl}/admin/deployment`}>
             {router.publicUrl}/admin/deployment
           </a>

@@ -121,11 +121,16 @@ const isPrimaryPublicHost =
 const isDeploymentRouter =
   explicitRouterFlag === 'true'
     ? true
-    : explicitRouterFlag === 'false'
+    : inferredCanaryRole || (isPreviewDeployment && !isPrimaryPublicHost)
       ? false
-      : inferredCanaryRole || (isPreviewDeployment && !isPrimaryPublicHost)
+      : explicitRouterFlag === 'false' && isPreviewDeployment
         ? false
-        : inferredRouterRole || isPrimaryPublicHost || vercelEnv === 'production' || isStaging || isDevelopment || isTest;
+        : inferredRouterRole ||
+          isPrimaryPublicHost ||
+          vercelEnv === 'production' ||
+          isStaging ||
+          isDevelopment ||
+          isTest;
 
 export const config = {
   nodeEnv,

@@ -40,6 +40,23 @@ export default function App() {
       .finally(() => setLoading(false));
   }, []);
 
+  useEffect(() => {
+    api
+      .get('/health')
+      .then(({ data }) => {
+        if (!data?.publicUrl) {
+          return;
+        }
+
+        const publicOrigin = new URL(data.publicUrl).origin;
+        if (window.location.origin !== publicOrigin) {
+          const nextUrl = `${data.publicUrl}${window.location.pathname}${window.location.search}${window.location.hash}`;
+          window.location.replace(nextUrl);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   return (
     <div className="min-h-screen">
       <Navbar user={user} onLogout={() => setUser(null)} />

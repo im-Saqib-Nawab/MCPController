@@ -8,7 +8,8 @@ import {
   resolveStickyAssignment,
   rolloutCookieOptions
 } from '../lib/deployment-assignment.js';
-import { isRouterExcludedPath, proxyRequestToCanary } from '../lib/deployment-proxy.js';
+import { isCanaryProxyPath, isDeploymentControlPlane, isRouterExcludedPath } from '../lib/deployment-routing.js';
+import { proxyRequestToCanary } from '../lib/deployment-proxy.js';
 import { getRolloutConfig } from '../services/deployment.service.js';
 import { config } from '../config/env.js';
 import { logOperation } from '../lib/request-context.js';
@@ -56,7 +57,7 @@ async function isCanaryHealthy(canaryDeploymentUrl) {
 
 export function canaryRouterMiddleware() {
   return async function canaryRouter(req, res, next) {
-    if (!config.isDeploymentRouter) {
+    if (!isDeploymentControlPlane(req)) {
       res.setHeader('x-deployment-version', config.deploymentVersion);
       res.setHeader('x-served-by', config.deploymentRole);
       return next();
@@ -108,6 +109,16 @@ export function canaryRouterMiddleware() {
         }),
         rolloutCookieOptions()
       );
+    }
+
+    if (!isCanaryProxyPath(req.path)) {
+      incrementMetric('deployment_requests_production_total');
+      attachDeploymentHeaders(res, {
+        assignment: sticky.assignment,
+        rollout,
+        servedBy: 'production'
+      });
+      return next();
     }
 
     const shouldProxy =
@@ -180,7 +191,7 @@ export function canaryRouterMiddleware() {
 }
 
 export function deploymentResponseHeadersMiddleware(req, res, next) {
-  if (!config.isDeploymentRouter || res.getHeader('x-served-by')) {
+  if (!isDeploymentControlPlane(req) || res.getHeader('x-served-by')) {
     return next();
   }
 

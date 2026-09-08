@@ -14,7 +14,7 @@ import {
   resolveStickyAssignment,
   verifyAssignmentCookie
 } from '../server/lib/deployment-assignment.js';
-import { isRouterExcludedPath } from '../server/lib/deployment-proxy.js';
+import { isRouterExcludedPath, isCanaryProxyPath } from '../server/lib/deployment-proxy.js';
 import { DEPLOYMENT_ROLLOUT_KEY } from '../server/models/DeploymentRollout.js';
 
 async function loginAdmin(agent, email = config.adminEmail, password = config.adminPassword) {
@@ -235,9 +235,20 @@ test('router excluded paths stay on the production control plane', () => {
   assert.equal(isRouterExcludedPath('/health/ready'), true);
   assert.equal(isRouterExcludedPath('/metrics'), true);
   assert.equal(isRouterExcludedPath('/api/metrics'), true);
+  assert.equal(isRouterExcludedPath('/assets/index-abc123.js'), true);
   assert.equal(isRouterExcludedPath('/mcp'), false);
   assert.equal(isRouterExcludedPath('/oauth/token'), false);
   assert.equal(isRouterExcludedPath('/dashboard'), false);
+});
+
+test('only backend routes are proxied to canary', () => {
+  assert.equal(isCanaryProxyPath('/admin/deployment'), false);
+  assert.equal(isCanaryProxyPath('/login'), false);
+  assert.equal(isCanaryProxyPath('/assets/index-abc123.js'), false);
+  assert.equal(isCanaryProxyPath('/api/doctors'), true);
+  assert.equal(isCanaryProxyPath('/mcp'), true);
+  assert.equal(isCanaryProxyPath('/oauth/token'), true);
+  assert.equal(isCanaryProxyPath('/api/admin/deployment/overview'), false);
 });
 
 test('sticky assignment remains stable across repeated requests at 50%', () => {
@@ -358,12 +369,38 @@ test('write operations reject non-router runtimes', async () => {
         setRolloutPercentage({
           percentage: 10,
           adminUser: { _id: '1', email: config.adminEmail, role: 'admin' },
-          requestId: 'test'
+          requestId: 'test',
+          req: { headers: { host: 'preview.example.vercel.app' } }
         }),
       (err) => err.status === 403
     );
   } finally {
     config.isDeploymentRouter = original;
+  }
+});
+
+test('write operations allow public entrypoint host even when router flag is false', async () => {
+  await seedRollout();
+
+  const adminUser = await User.findOne({ email: config.adminEmail }).lean();
+  assert.ok(adminUser);
+
+  const { setRolloutPercentage } = await import('../server/services/deployment.service.js');
+  const original = config.isDeploymentRouter;
+  config.isDeploymentRouter = false;
+
+  try {
+    const publicHost = new URL(config.apiUrl).hostname;
+    const rollout = await setRolloutPercentage({
+      percentage: 10,
+      adminUser,
+      requestId: 'test',
+      req: { headers: { host: publicHost } }
+    });
+    assert.equal(rollout.canaryPercentage, 10);
+  } finally {
+    config.isDeploymentRouter = original;
+    await seedRollout({ canaryPercentage: 0, rolloutEnabled: false, assignmentEpoch: 1 });
   }
 });
 
