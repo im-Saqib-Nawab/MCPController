@@ -56,6 +56,10 @@ const deploymentRolloutSchema = new mongoose.Schema(
       type: String,
       trim: true,
       default: ''
+    },
+    deploymentManagerEmails: {
+      type: [String],
+      default: () => []
     }
   },
   { timestamps: true }

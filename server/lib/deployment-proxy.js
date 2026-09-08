@@ -137,14 +137,19 @@ export async function proxyRequestToCanary(req, res, { canaryDeploymentUrl, cana
       durationMs: Date.now() - started,
       errorMessage: err?.message
     });
+    return false;
+  }
 
-    if (!res.headersSent) {
-      res.status(502).json({
-        error: 'canary_unavailable',
-        message: 'The canary deployment is unreachable.'
-      });
-    }
-    return;
+  if (upstream.status >= 500 || upstream.status === 404) {
+    logOperation('warn', 'deployment.proxy.unhealthy_response', {
+      route: req.path,
+      method: req.method,
+      targetUrl,
+      canaryVersion,
+      statusCode: upstream.status,
+      durationMs: Date.now() - started
+    });
+    return false;
   }
 
   const responseHeaders = sanitizeProxyResponseHeaders(Object.fromEntries(upstream.headers.entries()), {
@@ -169,26 +174,19 @@ export async function proxyRequestToCanary(req, res, { canaryDeploymentUrl, cana
       canaryVersion,
       durationMs: Date.now() - started
     });
-    return;
+    return true;
   }
 
   try {
     await pipeline(Readable.fromWeb(upstream.body), res);
   } catch (err) {
-    if (!res.headersSent) {
-      res.status(502).json({
-        error: 'canary_stream_failed',
-        message: 'Failed while streaming the canary response.'
-      });
-    }
-
     logOperation('error', 'deployment.proxy.stream_failed', {
       route: req.path,
       method: req.method,
       canaryVersion,
       errorMessage: err?.message
     });
-    return;
+    return false;
   }
 
   logOperation('info', 'deployment.proxy.completed', {
@@ -198,6 +196,7 @@ export async function proxyRequestToCanary(req, res, { canaryDeploymentUrl, cana
     canaryVersion,
     durationMs: Date.now() - started
   });
+  return true;
 }
 
 function isAuthBootstrapPath(pathname = '') {

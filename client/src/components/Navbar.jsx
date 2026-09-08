@@ -47,11 +47,9 @@ export default function Navbar({ user, onLogout }) {
                   <Link to="/admin/observability" className="text-slate-600 hover:text-slate-900">
                     Observability
                   </Link>
-                  {user.isSuperAdmin ? (
-                    <Link to="/admin/deployment" className="text-slate-600 hover:text-slate-900">
-                      Deployment
-                    </Link>
-                  ) : null}
+                  <Link to="/admin/deployment" className="text-slate-600 hover:text-slate-900">
+                    Deployment
+                  </Link>
                 </>
               ) : null}
               {user.features?.medicine_health_tips?.canView ? (

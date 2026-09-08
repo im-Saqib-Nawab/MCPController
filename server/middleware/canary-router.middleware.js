@@ -12,6 +12,8 @@ import { isRouterExcludedPath, proxyRequestToCanary } from '../lib/deployment-pr
 import { getRolloutConfig } from '../services/deployment.service.js';
 import { config } from '../config/env.js';
 import { logOperation } from '../lib/request-context.js';
+import { incrementMetric } from '../lib/runtime-metrics.js';
+import { checkCanaryHealth } from '../services/deployment.service.js';
 
 function attachDeploymentHeaders(res, { assignment, rollout, servedBy }) {
   const productionVersion = rollout.productionVersion || config.deploymentVersion;
@@ -21,6 +23,35 @@ function attachDeploymentHeaders(res, { assignment, rollout, servedBy }) {
   );
   res.setHeader('x-served-by', servedBy);
   res.setHeader('x-rollout-assignment', assignment);
+}
+
+const canaryHealthCache = {
+  url: '',
+  checkedAt: 0,
+  healthy: false
+};
+
+const CANARY_HEALTH_CACHE_MS = 15000;
+
+async function isCanaryHealthy(canaryDeploymentUrl) {
+  const target = String(canaryDeploymentUrl || '').replace(/\/+$/, '');
+  if (!target) {
+    return false;
+  }
+
+  const now = Date.now();
+  if (
+    canaryHealthCache.url === target &&
+    now - canaryHealthCache.checkedAt < CANARY_HEALTH_CACHE_MS
+  ) {
+    return canaryHealthCache.healthy;
+  }
+
+  const health = await checkCanaryHealth(target);
+  canaryHealthCache.url = target;
+  canaryHealthCache.checkedAt = now;
+  canaryHealthCache.healthy = Boolean(health.healthy);
+  return canaryHealthCache.healthy;
 }
 
 export function canaryRouterMiddleware() {
@@ -87,10 +118,29 @@ export function canaryRouterMiddleware() {
       rollout.canaryVersion;
 
     if (!shouldProxy) {
+      incrementMetric('deployment_requests_production_total');
       attachDeploymentHeaders(res, {
         assignment: sticky.assignment,
         rollout,
         servedBy: 'production'
+      });
+      return next();
+    }
+
+    const canaryHealthy = await isCanaryHealthy(rollout.canaryDeploymentUrl);
+    if (!canaryHealthy) {
+      incrementMetric('deployment_proxy_failover_total');
+      incrementMetric('deployment_requests_production_total');
+      logOperation('warn', 'deployment.route.canary_failover', {
+        route: req.path,
+        method: req.method,
+        canaryVersion: rollout.canaryVersion,
+        reason: 'canary_unhealthy'
+      });
+      attachDeploymentHeaders(res, {
+        assignment: 'production',
+        rollout,
+        servedBy: 'production-failover'
       });
       return next();
     }
@@ -104,10 +154,28 @@ export function canaryRouterMiddleware() {
       reason: sticky.reason
     });
 
-    await proxyRequestToCanary(req, res, {
+    incrementMetric('deployment_requests_canary_total');
+    const proxied = await proxyRequestToCanary(req, res, {
       canaryDeploymentUrl: rollout.canaryDeploymentUrl,
       canaryVersion: rollout.canaryVersion
     });
+
+    if (!proxied) {
+      incrementMetric('deployment_proxy_failover_total');
+      incrementMetric('deployment_requests_production_total');
+      logOperation('warn', 'deployment.route.canary_failover', {
+        route: req.path,
+        method: req.method,
+        canaryVersion: rollout.canaryVersion,
+        reason: 'proxy_failed'
+      });
+      attachDeploymentHeaders(res, {
+        assignment: 'production',
+        rollout,
+        servedBy: 'production-failover'
+      });
+      return next();
+    }
   };
 }
 

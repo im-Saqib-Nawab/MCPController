@@ -329,15 +329,37 @@ test('percentage presets 10, 50, and 100 are accepted', async () => {
   assert.equal(zero.body.rollout.canaryPercentage, 0);
 });
 
-test('preview deployment control plane guard rejects non-router runtimes', async () => {
+test('deployment overview is readable on non-router runtimes', async () => {
   const { getDeploymentOverview } = await import('../server/services/deployment.service.js');
   const original = config.isDeploymentRouter;
 
   config.isDeploymentRouter = false;
 
   try {
+    const overview = await getDeploymentOverview();
+    assert.equal(overview.router.isRouter, false);
+    assert.equal(overview.router.canManageFromHere, false);
+    assert.ok(overview.servers);
+    assert.ok(overview.traffic);
+  } finally {
+    config.isDeploymentRouter = original;
+  }
+});
+
+test('write operations reject non-router runtimes', async () => {
+  const { setRolloutPercentage } = await import('../server/services/deployment.service.js');
+  const original = config.isDeploymentRouter;
+
+  config.isDeploymentRouter = false;
+
+  try {
     await assert.rejects(
-      () => getDeploymentOverview(),
+      () =>
+        setRolloutPercentage({
+          percentage: 10,
+          adminUser: { _id: '1', email: config.adminEmail, role: 'admin' },
+          requestId: 'test'
+        }),
       (err) => err.status === 403
     );
   } finally {

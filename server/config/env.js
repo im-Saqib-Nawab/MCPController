@@ -90,12 +90,42 @@ const inferredRouterRole =
   deploymentRole === 'router' || deploymentRole === 'production' || deploymentRole === 'control-plane';
 const inferredCanaryRole = deploymentRole === 'canary' || deploymentRole === 'preview' || deploymentRole === 'target';
 const isPreviewDeployment = vercelEnv === 'preview';
+
+function resolvePublicHost() {
+  try {
+    return new URL((process.env.API_URL || process.env.APP_URL || '').trim()).hostname.toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+function resolveDeploymentHost() {
+  const vercelUrl = String(process.env.VERCEL_URL || '').trim().toLowerCase();
+  if (vercelUrl) {
+    return vercelUrl;
+  }
+
+  try {
+    return new URL((process.env.VERCEL_BRANCH_URL || '').trim()).hostname.toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+const publicHost = resolvePublicHost();
+const deploymentHost = resolveDeploymentHost();
+const isPrimaryPublicHost =
+  Boolean(publicHost && deploymentHost) &&
+  (publicHost === deploymentHost || publicHost.endsWith(`.${deploymentHost}`));
+
 const isDeploymentRouter =
   explicitRouterFlag === 'true'
     ? true
-    : explicitRouterFlag === 'false' || inferredCanaryRole || isPreviewDeployment
+    : explicitRouterFlag === 'false'
       ? false
-      : inferredRouterRole || isProduction || isStaging || isDevelopment || isTest;
+      : inferredCanaryRole || (isPreviewDeployment && !isPrimaryPublicHost)
+        ? false
+        : inferredRouterRole || isPrimaryPublicHost || vercelEnv === 'production' || isStaging || isDevelopment || isTest;
 
 export const config = {
   nodeEnv,

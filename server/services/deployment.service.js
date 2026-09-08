@@ -4,11 +4,13 @@ import {
   ROLLOUT_STATUSES
 } from '../models/DeploymentRollout.js';
 import { DeploymentRolloutAudit } from '../models/DeploymentRolloutAudit.js';
+import { User } from '../models/User.js';
 import { config } from '../config/env.js';
 import { AppError } from '../middleware/error.middleware.js';
 import { logAudit } from '../lib/audit-log.js';
 import { validateCanaryDeploymentUrl, normalizeVersionIdentifier } from '../lib/deployment-url.js';
-import { computeAssignment, rolloutBucket } from '../lib/deployment-assignment.js';
+import { rolloutBucket } from '../lib/deployment-assignment.js';
+import { getRuntimeMetricsSnapshot } from '../lib/runtime-metrics.js';
 
 const rolloutCache = {
   value: null,
@@ -37,6 +39,9 @@ function stripRollout(doc) {
     assignmentEpoch: plain.assignmentEpoch ?? 1,
     updatedBy: plain.updatedBy ? String(plain.updatedBy) : null,
     updatedByEmail: plain.updatedByEmail || '',
+    deploymentManagerEmails: Array.isArray(plain.deploymentManagerEmails)
+      ? plain.deploymentManagerEmails.map((email) => String(email).trim().toLowerCase()).filter(Boolean)
+      : [],
     updatedAt: plain.updatedAt,
     createdAt: plain.createdAt
   };
@@ -150,9 +155,111 @@ function assertRouterControlPlane() {
     throw new AppError(
       403,
       'forbidden',
-      'Deployment control is only available on the production router deployment.'
+      'Deployment changes are only available on the production router deployment.'
     );
   }
+}
+
+function isPrimaryAdminEmail(email) {
+  return (
+    Boolean(email) &&
+    String(email).trim().toLowerCase() === String(config.adminEmail).trim().toLowerCase()
+  );
+}
+
+export function canManageDeployment(email, rollout) {
+  const normalized = String(email || '').trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+
+  if (isPrimaryAdminEmail(normalized)) {
+    return true;
+  }
+
+  return (rollout?.deploymentManagerEmails || []).includes(normalized);
+}
+
+async function probeDeploymentHealth(baseUrl, { timeoutMs = 5000 } = {}) {
+  const target = String(baseUrl || '').replace(/\/+$/, '');
+  if (!target) {
+    return {
+      healthy: false,
+      status: 0,
+      latencyMs: 0,
+      version: '',
+      message: 'No deployment URL configured.'
+    };
+  }
+
+  const started = Date.now();
+
+  try {
+    const response = await fetch(`${target}/api/health/live`, {
+      method: 'GET',
+      headers: {
+        'x-canary-health-probe': 'true',
+        accept: 'application/json'
+      },
+      signal: AbortSignal.timeout(timeoutMs)
+    });
+
+    let payload = {};
+    try {
+      payload = await response.json();
+    } catch {
+      payload = {};
+    }
+
+    return {
+      healthy: response.ok,
+      status: response.status,
+      latencyMs: Date.now() - started,
+      version: payload.deploymentVersion || '',
+      deploymentRole: payload.deploymentRole || '',
+      message: response.ok ? 'Healthy' : `Health check returned ${response.status}.`
+    };
+  } catch (err) {
+    return {
+      healthy: false,
+      status: 0,
+      latencyMs: Date.now() - started,
+      version: '',
+      message: err?.message || 'Health check failed.'
+    };
+  }
+}
+
+async function buildTrafficStats(rollout) {
+  const metrics = getRuntimeMetricsSnapshot();
+  const productionRequests = metrics.counters?.deployment_requests_production_total || 0;
+  const canaryRequests = metrics.counters?.deployment_requests_canary_total || 0;
+  const proxyFailovers = metrics.counters?.deployment_proxy_failover_total || 0;
+  const totalRequests = productionRequests + canaryRequests;
+  const registeredUsers = await User.countDocuments({});
+  const pct = rollout.rolloutEnabled ? rollout.canaryPercentage : 0;
+  const estimatedCanaryUsers = Math.round((registeredUsers * pct) / 100);
+  const estimatedProductionUsers = Math.max(registeredUsers - estimatedCanaryUsers, 0);
+
+  return {
+    registeredUsers,
+    estimatedProductionUsers,
+    estimatedCanaryUsers,
+    requestCounts: {
+      production: productionRequests,
+      canary: canaryRequests,
+      total: totalRequests,
+      productionSharePercent: totalRequests
+        ? Math.round((productionRequests / totalRequests) * 100)
+        : pct === 0
+          ? 100
+          : 100 - pct,
+      canarySharePercent: totalRequests
+        ? Math.round((canaryRequests / totalRequests) * 100)
+        : pct
+    },
+    proxyFailovers
+  };
 }
 
 function assertCanaryReady(doc) {
@@ -166,8 +273,22 @@ function assertCanaryReady(doc) {
 }
 
 export async function getDeploymentOverview() {
-  assertRouterControlPlane();
   const rollout = await getRolloutConfig({ fresh: true });
+  const traffic = await buildTrafficStats(rollout);
+  const canaryPct = rollout.rolloutEnabled ? rollout.canaryPercentage : 0;
+
+  const [productionHealth, canaryHealth] = await Promise.all([
+    probeDeploymentHealth(config.apiUrl),
+    rollout.canaryDeploymentUrl
+      ? probeDeploymentHealth(rollout.canaryDeploymentUrl)
+      : Promise.resolve({
+          healthy: false,
+          status: 0,
+          latencyMs: 0,
+          version: '',
+          message: 'Canary target not configured.'
+        })
+  ]);
 
   return {
     rollout,
@@ -175,9 +296,30 @@ export async function getDeploymentOverview() {
       deploymentVersion: config.deploymentVersion,
       deploymentRole: config.deploymentRole,
       publicUrl: config.apiUrl,
-      isRouter: config.isDeploymentRouter
+      isRouter: config.isDeploymentRouter,
+      currentHost: process.env.VERCEL_URL || '',
+      canManageFromHere: config.isDeploymentRouter
     },
-    assignmentPreview: buildAssignmentPreview(rollout)
+    assignmentPreview: buildAssignmentPreview(rollout),
+    traffic,
+    servers: {
+      production: {
+        label: 'Server 1 (Production)',
+        url: config.apiUrl,
+        version: rollout.productionVersion || config.deploymentVersion,
+        trafficPercent: 100 - canaryPct,
+        active: true,
+        health: productionHealth
+      },
+      canary: {
+        label: 'Server 2 (Canary / Preview)',
+        url: rollout.canaryDeploymentUrl || '',
+        version: rollout.canaryVersion || '',
+        trafficPercent: canaryPct,
+        active: Boolean(rollout.rolloutEnabled && canaryPct > 0 && canaryHealth.healthy),
+        health: canaryHealth
+      }
+    }
   };
 }
 
@@ -321,8 +463,6 @@ export async function syncProductionVersion({ productionVersion, adminUser, requ
 }
 
 export async function listDeploymentAudits({ limit = 50 } = {}) {
-  assertRouterControlPlane();
-
   const audits = await DeploymentRolloutAudit.find({})
     .sort({ createdAt: -1 })
     .limit(Math.min(Number(limit) || 50, 200))
@@ -357,6 +497,53 @@ export function estimateAssignmentCounts(rollout, subjects) {
   }
 
   return { canary, production, total: subjects.length };
+}
+
+function normalizeManagerEmail(email) {
+  return String(email || '').trim().toLowerCase();
+}
+
+export async function grantDeploymentManager({ email, adminUser, requestId }) {
+  assertRouterControlPlane();
+
+  const normalized = normalizeManagerEmail(email);
+  if (!normalized) {
+    throw new AppError(400, 'invalid_request', 'A valid administrator email is required.');
+  }
+
+  if (isPrimaryAdminEmail(normalized)) {
+    throw new AppError(400, 'invalid_request', 'The primary administrator already has full deployment access.');
+  }
+
+  const manager = await User.findOne({ email: normalized, role: 'admin' }).lean();
+  if (!manager) {
+    throw new AppError(404, 'not_found', 'No administrator account exists for that email.');
+  }
+
+  const doc = await loadMutableRollout();
+  const managers = new Set(doc.deploymentManagerEmails || []);
+  managers.add(normalized);
+  doc.deploymentManagerEmails = [...managers];
+  return saveRollout(doc, adminUser, 'grant_deployment_manager', requestId);
+}
+
+export async function revokeDeploymentManager({ email, adminUser, requestId }) {
+  assertRouterControlPlane();
+
+  const normalized = normalizeManagerEmail(email);
+  if (!normalized) {
+    throw new AppError(400, 'invalid_request', 'A valid administrator email is required.');
+  }
+
+  const doc = await loadMutableRollout();
+  doc.deploymentManagerEmails = (doc.deploymentManagerEmails || []).filter(
+    (entry) => normalizeManagerEmail(entry) !== normalized
+  );
+  return saveRollout(doc, adminUser, 'revoke_deployment_manager', requestId);
+}
+
+export async function checkCanaryHealth(canaryDeploymentUrl) {
+  return probeDeploymentHealth(canaryDeploymentUrl);
 }
 
 export { ROLLOUT_STATUSES };

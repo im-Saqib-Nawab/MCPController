@@ -17,6 +17,10 @@ const enabledSchema = z.object({
   enabled: z.boolean()
 });
 
+const managerSchema = z.object({
+  email: z.string().email()
+});
+
 function parseOrThrow(schema, data) {
   const result = schema.safeParse(data);
   if (!result.success) {
@@ -28,11 +32,13 @@ function parseOrThrow(schema, data) {
 export async function overview(req, res, next) {
   try {
     const data = await deploymentService.getDeploymentOverview();
+    const canManage = deploymentService.canManageDeployment(req.user?.email, data.rollout);
     res.json({
       ...data,
       permissions: {
-        canManage: isSuperAdminEmail(req.user?.email),
-        isSuperAdmin: isSuperAdminEmail(req.user?.email)
+        canManage,
+        isSuperAdmin: isSuperAdminEmail(req.user?.email),
+        canManageFromHere: data.router.canManageFromHere
       }
     });
   } catch (err) {
@@ -122,6 +128,34 @@ export async function syncProductionVersion(req, res, next) {
   try {
     const rollout = await deploymentService.syncProductionVersion({
       productionVersion: req.body?.productionVersion,
+      adminUser: req.user,
+      requestId: req.requestId
+    });
+    res.json({ rollout });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function grantManager(req, res, next) {
+  try {
+    const parsed = parseOrThrow(managerSchema, req.body);
+    const rollout = await deploymentService.grantDeploymentManager({
+      email: parsed.email,
+      adminUser: req.user,
+      requestId: req.requestId
+    });
+    res.json({ rollout });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function revokeManager(req, res, next) {
+  try {
+    const parsed = parseOrThrow(managerSchema, req.body);
+    const rollout = await deploymentService.revokeDeploymentManager({
+      email: parsed.email,
       adminUser: req.user,
       requestId: req.requestId
     });

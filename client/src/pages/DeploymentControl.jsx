@@ -32,7 +32,8 @@ function StatusBadge({ label, tone = 'slate' }) {
     slate: 'bg-slate-100 text-slate-700',
     green: 'bg-emerald-100 text-emerald-800',
     amber: 'bg-amber-100 text-amber-900',
-    blue: 'bg-blue-100 text-blue-800'
+    blue: 'bg-blue-100 text-blue-800',
+    red: 'bg-red-100 text-red-800'
   };
 
   return (
@@ -42,18 +43,61 @@ function StatusBadge({ label, tone = 'slate' }) {
   );
 }
 
+function ServerCard({ server, tone }) {
+  const healthTone = server.health?.healthy ? 'green' : server.active ? 'amber' : 'red';
+  const statusLabel = server.health?.healthy ? 'Healthy' : server.active ? 'Unavailable' : 'Idle';
+
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{server.label}</p>
+          <h2 className="mt-1 text-xl font-semibold text-slate-900">{server.version || 'Not configured'}</h2>
+        </div>
+        <div className="flex flex-col items-end gap-2">
+          <StatusBadge label={server.active ? 'Active' : 'Standby'} tone={tone} />
+          <StatusBadge label={statusLabel} tone={healthTone} />
+        </div>
+      </div>
+
+      <dl className="mt-4 space-y-2 text-sm text-slate-600">
+        <div className="flex justify-between gap-3">
+          <dt>Traffic share</dt>
+          <dd className="font-medium text-slate-900">{server.trafficPercent}%</dd>
+        </div>
+        <div className="flex justify-between gap-3">
+          <dt>URL</dt>
+          <dd className="max-w-[14rem] truncate font-medium text-slate-900" title={server.url || '—'}>
+            {server.url || '—'}
+          </dd>
+        </div>
+        <div className="flex justify-between gap-3">
+          <dt>Health check</dt>
+          <dd className="font-medium text-slate-900">
+            {server.health?.healthy
+              ? `${server.health.latencyMs}ms`
+              : server.health?.message || 'Unknown'}
+          </dd>
+        </div>
+      </dl>
+    </section>
+  );
+}
+
 export default function DeploymentControl({ user }) {
   const [overview, setOverview] = useState(null);
   const [audits, setAudits] = useState([]);
   const [canaryUrl, setCanaryUrl] = useState('');
   const [canaryVersion, setCanaryVersion] = useState('');
+  const [managerEmail, setManagerEmail] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(true);
   const [busyAction, setBusyAction] = useState('');
   const [confirm, setConfirm] = useState(null);
 
-  const canManage = Boolean(user?.isSuperAdmin && overview?.permissions?.canManage);
+  const canManage = Boolean(overview?.permissions?.canManage && overview?.permissions?.canManageFromHere);
+  const isSuperAdmin = Boolean(overview?.permissions?.isSuperAdmin);
 
   const traffic = useMemo(() => {
     const pct = overview?.rollout?.rolloutEnabled ? overview.rollout.canaryPercentage : 0;
@@ -120,6 +164,8 @@ export default function DeploymentControl({ user }) {
 
   const rollout = overview.rollout;
   const router = overview.router;
+  const stats = overview.traffic;
+  const servers = overview.servers;
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-10">
@@ -140,80 +186,78 @@ export default function DeploymentControl({ user }) {
         </div>
       ) : null}
 
-      {!canManage ? (
-        <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          You can view deployment status, but only the primary administrator can change rollout settings.
+      {!router.canManageFromHere ? (
+        <div className="mb-6 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+          You can monitor deployment status here, but rollout changes must be made from the production router at{' '}
+          <a className="font-medium underline" href={`${router.publicUrl}/admin/deployment`}>
+            {router.publicUrl}/admin/deployment
+          </a>
+          .
         </div>
       ) : null}
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <section className="rounded-xl border border-slate-200 bg-white p-5">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Production</p>
-              <h2 className="mt-1 text-xl font-semibold text-slate-900">{rollout.productionVersion || router.deploymentVersion}</h2>
-            </div>
-            <StatusBadge label="Live" tone="green" />
-          </div>
-          <dl className="mt-4 space-y-2 text-sm text-slate-600">
-            <div className="flex justify-between gap-3">
-              <dt>Router version</dt>
-              <dd className="font-medium text-slate-900">{router.deploymentVersion}</dd>
-            </div>
-            <div className="flex justify-between gap-3">
-              <dt>Public URL</dt>
-              <dd className="font-medium text-slate-900">{router.publicUrl}</dd>
-            </div>
-          </dl>
-        </section>
+      {!canManage && router.canManageFromHere ? (
+        <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          You can view deployment status, but only the primary administrator or delegated deployment managers can change rollout settings.
+        </div>
+      ) : null}
 
-        <section className="rounded-xl border border-slate-200 bg-white p-5">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Canary</p>
-              <h2 className="mt-1 text-xl font-semibold text-slate-900">
-                {rollout.canaryVersion || 'Not configured'}
-              </h2>
-            </div>
-            <StatusBadge label={rollout.rolloutEnabled ? 'Rolling' : 'Preview'} tone={rollout.rolloutEnabled ? 'amber' : 'blue'} />
-          </div>
-          <dl className="mt-4 space-y-2 text-sm text-slate-600">
-            <div className="flex justify-between gap-3">
-              <dt>Target URL</dt>
-              <dd className="max-w-[14rem] truncate font-medium text-slate-900" title={rollout.canaryDeploymentUrl || '—'}>
-                {rollout.canaryDeploymentUrl || '—'}
-              </dd>
-            </div>
-            <div className="flex justify-between gap-3">
-              <dt>Rollout status</dt>
-              <dd className="font-medium capitalize text-slate-900">{rollout.rolloutStatus}</dd>
-            </div>
-          </dl>
-        </section>
+      <section className="mb-6 grid gap-4 sm:grid-cols-3">
+        <div className="rounded-xl border border-slate-200 bg-white p-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Registered users</p>
+          <p className="mt-2 text-2xl font-semibold text-slate-900">{stats?.registeredUsers ?? 0}</p>
+        </div>
+        <div className="rounded-xl border border-slate-200 bg-white p-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Est. on Server 1</p>
+          <p className="mt-2 text-2xl font-semibold text-emerald-700">{stats?.estimatedProductionUsers ?? 0}</p>
+        </div>
+        <div className="rounded-xl border border-slate-200 bg-white p-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Est. on Server 2</p>
+          <p className="mt-2 text-2xl font-semibold text-amber-700">{stats?.estimatedCanaryUsers ?? 0}</p>
+        </div>
+      </section>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <ServerCard server={servers.production} tone="green" />
+        <ServerCard server={servers.canary} tone="amber" />
       </div>
 
       <section className="mt-6 rounded-xl border border-slate-200 bg-white p-5">
-        <h2 className="font-semibold text-slate-900">Traffic</h2>
+        <h2 className="font-semibold text-slate-900">Live Traffic</h2>
         <div className="mt-4 grid gap-4 sm:grid-cols-2">
           <div>
             <div className="flex items-center justify-between text-sm">
-              <span className="text-slate-600">Production</span>
+              <span className="text-slate-600">Production (Server 1)</span>
               <span className="font-semibold text-slate-900">{traffic.production}%</span>
             </div>
             <div className="mt-2 h-2 rounded-full bg-slate-100">
-              <div className="h-2 rounded-full bg-emerald-500" style={{ width: `${traffic.production}%` }} />
+              <div className="h-2 rounded-full bg-emerald-500 transition-all duration-300" style={{ width: `${traffic.production}%` }} />
             </div>
+            <p className="mt-2 text-xs text-slate-500">
+              {stats?.requestCounts?.production ?? 0} routed requests ·{' '}
+              {stats?.requestCounts?.productionSharePercent ?? 0}% of observed traffic
+            </p>
           </div>
           <div>
             <div className="flex items-center justify-between text-sm">
-              <span className="text-slate-600">Canary</span>
+              <span className="text-slate-600">Canary (Server 2)</span>
               <span className="font-semibold text-slate-900">{traffic.canary}%</span>
             </div>
             <div className="mt-2 h-2 rounded-full bg-slate-100">
-              <div className="h-2 rounded-full bg-amber-500" style={{ width: `${traffic.canary}%` }} />
+              <div className="h-2 rounded-full bg-amber-500 transition-all duration-300" style={{ width: `${traffic.canary}%` }} />
             </div>
+            <p className="mt-2 text-xs text-slate-500">
+              {stats?.requestCounts?.canary ?? 0} routed requests ·{' '}
+              {stats?.requestCounts?.canarySharePercent ?? 0}% of observed traffic
+            </p>
           </div>
         </div>
+
+        {stats?.proxyFailovers ? (
+          <p className="mt-4 text-sm text-amber-800">
+            Automatic failovers to Server 1: {stats.proxyFailovers}. Users are kept on the stable deployment when Server 2 is unavailable.
+          </p>
+        ) : null}
 
         <div className="mt-5 flex flex-wrap gap-2">
           {PERCENTAGE_PRESETS.map((pct) => (
@@ -225,8 +269,8 @@ export default function DeploymentControl({ user }) {
               onClick={() => {
                 if (pct === 100) {
                   askConfirm({
-                    title: 'Send 100% traffic to canary?',
-                    message: 'Every sticky assignment will route to the preview deployment. Roll back immediately if anything breaks.',
+                    title: 'Send 100% traffic to Server 2?',
+                    message: 'Every sticky assignment will route to the preview deployment. Users stay on the public URL and are redirected automatically if Server 2 fails.',
                     confirmLabel: 'Set 100%',
                     action: () => runAction(`pct-${pct}`, async () => {
                       await api.patch('/admin/deployment/percentage', { percentage: pct });
@@ -254,8 +298,8 @@ export default function DeploymentControl({ user }) {
             disabled={!canManage || busyAction !== ''}
             onClick={() =>
               askConfirm({
-                title: 'Rollback to production?',
-                message: 'Traffic goes to 0% canary immediately and sticky assignments reset via a new assignment epoch.',
+                title: 'Rollback to Server 1?',
+                message: 'Traffic goes to 0% canary immediately and sticky assignments reset. Users keep their login session.',
                 confirmLabel: 'Rollback',
                 action: () => runAction('rollback', async () => {
                   await api.post('/admin/deployment/rollback');
@@ -289,7 +333,7 @@ export default function DeploymentControl({ user }) {
       <section className="mt-6 rounded-xl border border-slate-200 bg-white p-5">
         <h2 className="font-semibold text-slate-900">Canary Target</h2>
         <p className="mt-1 text-sm text-slate-500">
-          Set the internal Vercel Preview URL for your canary branch. It is never shown to end users as the public MCP URL.
+          Set the internal Vercel Preview URL for Server 2. End users always stay on the public URL above.
         </p>
         <form
           className="mt-4 grid gap-4"
@@ -315,7 +359,7 @@ export default function DeploymentControl({ user }) {
               className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
               value={canaryUrl}
               onChange={(event) => setCanaryUrl(event.target.value)}
-              placeholder="https://mcpcontroller-git-canary-yourteam.vercel.app"
+              placeholder="https://mcpcontroller-git-main-saqib-nawabs-projects-cbd2e8b2.vercel.app"
               disabled={!canManage || busyAction !== ''}
               required
             />
@@ -338,9 +382,72 @@ export default function DeploymentControl({ user }) {
         </form>
       </section>
 
+      {isSuperAdmin && router.canManageFromHere ? (
+        <section className="mt-6 rounded-xl border border-slate-200 bg-white p-5">
+          <h2 className="font-semibold text-slate-900">Delegated Deployment Managers</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            Grant another admin permission to change rollout settings without sharing the primary administrator account.
+          </p>
+
+          {(rollout.deploymentManagerEmails || []).length ? (
+            <ul className="mt-4 space-y-2">
+              {rollout.deploymentManagerEmails.map((email) => (
+                <li key={email} className="flex items-center justify-between rounded-lg border border-slate-100 px-3 py-2 text-sm">
+                  <span className="font-medium text-slate-900">{email}</span>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={busyAction !== ''}
+                    onClick={() =>
+                      runAction(`revoke-${email}`, async () => {
+                        await api.post('/admin/deployment/managers/revoke', { email });
+                        setSuccess(`Removed deployment access for ${email}.`);
+                      })
+                    }
+                  >
+                    Revoke
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-3 text-sm text-slate-500">No delegated managers yet.</p>
+          )}
+
+          <form
+            className="mt-4 flex flex-col gap-3 sm:flex-row"
+            onSubmit={(event) => {
+              event.preventDefault();
+              runAction('grant-manager', async () => {
+                await api.post('/admin/deployment/managers/grant', { email: managerEmail });
+                setManagerEmail('');
+                setSuccess(`Granted deployment access to ${managerEmail}.`);
+              });
+            }}
+          >
+            <input
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              type="email"
+              value={managerEmail}
+              onChange={(event) => setManagerEmail(event.target.value)}
+              placeholder="admin@example.com"
+              disabled={busyAction !== ''}
+              required
+            />
+            <Button type="submit" disabled={busyAction !== '' || !managerEmail}>
+              Grant Access
+            </Button>
+          </form>
+        </section>
+      ) : null}
+
       <section className="mt-6 rounded-xl border border-slate-200 bg-white p-5">
         <h2 className="font-semibold text-slate-900">Rollout Metadata</h2>
         <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
+          <div>
+            <dt className="text-slate-500">Control plane</dt>
+            <dd className="font-medium text-slate-900">{router.isRouter ? 'Production router' : 'Canary target (read-only)'}</dd>
+          </div>
           <div>
             <dt className="text-slate-500">Last changed by</dt>
             <dd className="font-medium text-slate-900">{rollout.updatedByEmail || '—'}</dd>

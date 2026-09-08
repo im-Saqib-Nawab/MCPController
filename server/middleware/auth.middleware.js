@@ -2,6 +2,7 @@ import jwt from 'jsonwebtoken';
 import { User } from '../models/User.js';
 import { config } from '../config/env.js';
 import { AppError } from './error.middleware.js';
+import { canManageDeployment, getRolloutConfig } from '../services/deployment.service.js';
 
 export async function requireUser(req, res, next) {
   try {
@@ -64,6 +65,39 @@ export function requireSuperAdmin(req, res, next) {
       );
     }
     next();
+  });
+}
+
+export function requireDeploymentManager(req, res, next) {
+  requireAdmin(req, res, async (err) => {
+    if (err) return next(err);
+
+    try {
+      if (!config.isDeploymentRouter) {
+        return next(
+          new AppError(
+            403,
+            'forbidden',
+            'Deployment changes are only available on the production router deployment.'
+          )
+        );
+      }
+
+      const rollout = await getRolloutConfig();
+      if (!canManageDeployment(req.user?.email, rollout)) {
+        return next(
+          new AppError(
+            403,
+            'forbidden',
+            'You do not have permission to change deployment routing.'
+          )
+        );
+      }
+
+      next();
+    } catch (serviceErr) {
+      next(serviceErr);
+    }
   });
 }
 

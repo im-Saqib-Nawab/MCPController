@@ -38,6 +38,7 @@ import {
   canaryRouterMiddleware,
   deploymentResponseHeadersMiddleware
 } from './middleware/canary-router.middleware.js';
+import { canonicalUrlMiddleware } from './middleware/canonical-url.middleware.js';
 import { csrfProtection } from './middleware/csrf.middleware.js';
 import { shouldSkipRateLimit } from './lib/rate-limit-policy.js';
 
@@ -308,6 +309,8 @@ app.use(csrfProtection);
 /* -------------------------------------------------------------------------- */
 
 app.use(requestLogMiddleware);
+
+app.use(canonicalUrlMiddleware());
 
 function isConfigDiagnosticRoute(pathname) {
   return (
