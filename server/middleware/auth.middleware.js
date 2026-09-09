@@ -4,8 +4,10 @@ import { config } from '../config/env.js';
 import { AppError } from './error.middleware.js';
 import { canManageDeployment, getRolloutConfig } from '../services/deployment.service.js';
 import { isDeploymentControlPlane } from '../lib/deployment-routing.js';
+import { recordPhaseTiming } from '../lib/request-timings.js';
 
 export async function requireUser(req, res, next) {
+  const authStarted = Date.now();
   try {
     const token = req.cookies?.[config.cookieName];
     if (!token) {
@@ -29,9 +31,11 @@ export async function requireUser(req, res, next) {
       throw new AppError(401, 'authentication_required', 'Authentication required');
     }
 
+    recordPhaseTiming('authentication', Date.now() - authStarted);
     req.user = user;
     next();
   } catch (err) {
+    recordPhaseTiming('authentication', Date.now() - authStarted);
     next(err);
   }
 }

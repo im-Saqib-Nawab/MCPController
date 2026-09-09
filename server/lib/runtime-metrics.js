@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import { config } from '../config/env.js';
 import { getLogQueueDepth } from './log-queue.js';
+import { percentile } from './percentile.js';
 
 const globalCache = globalThis;
 
@@ -48,13 +49,6 @@ export function recordHttpRequest({ method, route, statusCode, durationMs }) {
   state.httpByRoute.set(routeKey, bucket);
 }
 
-function percentile(values, p) {
-  if (!values.length) return 0;
-  const sorted = [...values].sort((a, b) => a - b);
-  const index = Math.ceil((p / 100) * sorted.length) - 1;
-  return sorted[Math.max(0, Math.min(index, sorted.length - 1))];
-}
-
 export function getHttpRuntimeMetrics() {
   const durations = state.httpDurationMs;
   const total = state.counters.get('http_requests_total') || 0;
@@ -80,6 +74,7 @@ export function getHttpRuntimeMetrics() {
       ? Math.round(durations.reduce((sum, value) => sum + value, 0) / durations.length)
       : 0,
     p95ResponseMs: Math.round(percentile(durations, 95)),
+    p99ResponseMs: Math.round(percentile(durations, 99)),
     slowRequests: state.counters.get('http_slow_requests_total') || 0,
     topRoutes
   };

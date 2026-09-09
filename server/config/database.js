@@ -124,7 +124,12 @@ async function syncCollectionIndexes() {
     { CreditTransaction },
     { Subscription },
     { PaymentOrder },
-    { McpSessionContext }
+    { McpSessionContext },
+    { RequestLatencySample },
+    { EndpointSlo },
+    { EndpointSloAudit },
+    { LatencyAlert },
+    { LatencyMinuteBucket }
   ] = await Promise.all([
     import('../models/Doctor.js'),
     import('../models/Appointment.js'),
@@ -137,7 +142,12 @@ async function syncCollectionIndexes() {
     import('../models/CreditTransaction.js'),
     import('../models/Subscription.js'),
     import('../models/PaymentOrder.js'),
-    import('../models/McpSessionContext.js')
+    import('../models/McpSessionContext.js'),
+    import('../models/RequestLatencySample.js'),
+    import('../models/EndpointSlo.js'),
+    import('../models/EndpointSloAudit.js'),
+    import('../models/LatencyAlert.js'),
+    import('../models/LatencyMinuteBucket.js')
   ]);
 
   try {
@@ -158,7 +168,12 @@ async function syncCollectionIndexes() {
     CreditTransaction.syncIndexes(),
     Subscription.syncIndexes(),
     PaymentOrder.syncIndexes(),
-    McpSessionContext.syncIndexes()
+    McpSessionContext.syncIndexes(),
+    RequestLatencySample.syncIndexes(),
+    EndpointSlo.syncIndexes(),
+    EndpointSloAudit.syncIndexes(),
+    LatencyAlert.syncIndexes(),
+    LatencyMinuteBucket.syncIndexes()
   ]);
 
   cache.indexesReady = true;

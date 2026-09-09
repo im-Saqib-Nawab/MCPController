@@ -7,7 +7,10 @@ const TABS = [
   { id: 'overview', label: 'Overview' },
   { id: 'logs', label: 'Logs' },
   { id: 'traces', label: 'Traces' },
-  { id: 'metrics', label: 'Metrics' }
+  { id: 'metrics', label: 'Metrics' },
+  { id: 'latency', label: 'Latency' },
+  { id: 'alerts', label: 'Alerts' },
+  { id: 'slo', label: 'SLO / Budgets' }
 ];
 
 const TIME_WINDOWS = [
@@ -43,6 +46,34 @@ function StatusBadge({ status }) {
       className={`rounded px-2 py-0.5 text-xs font-medium ${ok ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}
     >
       {ok ? 'Success' : 'Failed'}
+    </span>
+  );
+}
+
+function formatMs(value) {
+  if (value == null) return '—';
+  if (value >= 1000) return `${(value / 1000).toFixed(1)}s`;
+  return `${value}ms`;
+}
+
+function SloStatusBadge({ status }) {
+  const styles = {
+    healthy: 'bg-emerald-100 text-emerald-800',
+    violating: 'bg-rose-100 text-rose-800',
+    warning: 'bg-amber-100 text-amber-800',
+    resolved: 'bg-slate-100 text-slate-700',
+    unknown: 'bg-slate-100 text-slate-600'
+  };
+  const labels = {
+    healthy: 'Healthy',
+    violating: 'Violating',
+    warning: 'Warning',
+    resolved: 'Resolved',
+    unknown: 'Unknown'
+  };
+  return (
+    <span className={`rounded px-2 py-0.5 text-xs font-medium ${styles[status] || styles.unknown}`}>
+      {labels[status] || status}
     </span>
   );
 }
@@ -84,6 +115,13 @@ export default function Observability() {
   const [logs, setLogs] = useState([]);
   const [traces, setTraces] = useState([]);
   const [metrics, setMetrics] = useState(null);
+  const [latency, setLatency] = useState(null);
+  const [alerts, setAlerts] = useState([]);
+  const [slos, setSlos] = useState([]);
+  const [selectedEndpoint, setSelectedEndpoint] = useState(null);
+  const [slowRequests, setSlowRequests] = useState(null);
+  const [selectedRequest, setSelectedRequest] = useState(null);
+  const [sloForm, setSloForm] = useState(null);
   const [selectedLog, setSelectedLog] = useState(null);
   const [selectedTrace, setSelectedTrace] = useState(null);
   const [filterOptions, setFilterOptions] = useState({ actions: [], roles: [], statuses: [] });
@@ -129,6 +167,15 @@ export default function Observability() {
       } else if (tab === 'metrics') {
         const { data } = await api.get('/admin/observability/metrics', { params: query });
         setMetrics(data.metrics);
+      } else if (tab === 'latency') {
+        const { data } = await api.get('/admin/observability/latency', { params: query });
+        setLatency(data.latency);
+      } else if (tab === 'alerts') {
+        const { data } = await api.get('/admin/observability/alerts', { params: query });
+        setAlerts(data.alerts || []);
+      } else if (tab === 'slo') {
+        const { data } = await api.get('/admin/observability/slo', { params: query });
+        setSlos(data.slos || []);
       }
     } catch (err) {
       setError(getErrorMessage(err));
@@ -144,7 +191,57 @@ export default function Observability() {
   function setTab(nextTab) {
     setSelectedLog(null);
     setSelectedTrace(null);
+    setSelectedEndpoint(null);
+    setSlowRequests(null);
+    setSelectedRequest(null);
+    setSloForm(null);
     setSearchParams({ tab: nextTab });
+  }
+
+  async function openEndpoint(endpoint, method) {
+    setSelectedEndpoint({ endpoint, method });
+    try {
+      const { data } = await api.get('/admin/observability/latency/slow-requests', {
+        params: { ...query, route: endpoint, method: method === '*' ? undefined : method }
+      });
+      setSlowRequests(data);
+    } catch (err) {
+      setError(getErrorMessage(err));
+    }
+  }
+
+  async function openRequestDetail(requestId) {
+    try {
+      const { data } = await api.get(`/admin/observability/latency/requests/${encodeURIComponent(requestId)}`);
+      setSelectedRequest(data.request);
+    } catch (err) {
+      setError(getErrorMessage(err));
+    }
+  }
+
+  async function saveSlo(event) {
+    event.preventDefault();
+    try {
+      if (sloForm.id) {
+        await api.patch(`/admin/observability/slo/${sloForm.id}`, sloForm);
+      } else {
+        await api.post('/admin/observability/slo', sloForm);
+      }
+      setSloForm(null);
+      await load();
+    } catch (err) {
+      setError(getErrorMessage(err));
+    }
+  }
+
+  async function deleteSlo(id) {
+    if (!window.confirm('Delete this SLO configuration?')) return;
+    try {
+      await api.delete(`/admin/observability/slo/${id}`);
+      await load();
+    } catch (err) {
+      setError(getErrorMessage(err));
+    }
   }
 
   async function openLog(logId) {
@@ -465,6 +562,272 @@ export default function Observability() {
               )) : <p className="text-sm text-slate-500">No failed actions in this window.</p>}
             </div>
           </Section>
+        </div>
+      ) : null}
+
+      {!loading && tab === 'latency' && latency ? (
+        <div className="space-y-6">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+            <MetricCard label="Requests" value={latency.summary.requestCount} />
+            <MetricCard label="P50" value={formatMs(latency.summary.p50Ms)} />
+            <MetricCard label="P95" value={formatMs(latency.summary.p95Ms)} />
+            <MetricCard label="P99" value={formatMs(latency.summary.p99Ms)} />
+            <MetricCard label="Errors" value={`${latency.summary.errorRate}%`} />
+          </div>
+
+          <Section title="Endpoint Performance">
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead className="text-left text-slate-500">
+                  <tr>
+                    <th className="py-2">Endpoint</th>
+                    <th className="py-2">Method</th>
+                    <th className="py-2">P95</th>
+                    <th className="py-2">P99</th>
+                    <th className="py-2">Budget</th>
+                    <th className="py-2">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {latency.endpoints.map((row) => (
+                    <tr
+                      key={`${row.method}:${row.endpoint}`}
+                      className="cursor-pointer border-t border-slate-100 hover:bg-slate-50"
+                      onClick={() => openEndpoint(row.endpoint, row.method)}
+                    >
+                      <td className="py-2 font-mono text-xs">{row.endpoint}</td>
+                      <td className="py-2">{row.method}</td>
+                      <td className="py-2">{formatMs(row.p95Ms)}</td>
+                      <td className="py-2">{formatMs(row.p99Ms)}</td>
+                      <td className="py-2">{row.budgetMs ? formatMs(row.budgetMs) : '—'}</td>
+                      <td className="py-2"><SloStatusBadge status={row.status} /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Section>
+
+          {selectedEndpoint && slowRequests ? (
+            <Section title={`Slow requests — ${selectedEndpoint.endpoint}`}>
+              <p className="mb-3 text-sm text-slate-600">
+                {slowRequests.metric.toUpperCase()}: {formatMs(slowRequests.metricValueMs)}
+              </p>
+              <table className="min-w-full text-sm">
+                <thead className="text-left text-slate-500">
+                  <tr><th className="py-2">Request ID</th><th className="py-2">Duration</th><th className="py-2">Status</th><th className="py-2">Version</th></tr>
+                </thead>
+                <tbody>
+                  {slowRequests.slowestRequests.map((row) => (
+                    <tr
+                      key={row.requestId}
+                      className="cursor-pointer border-t border-slate-100 hover:bg-slate-50"
+                      onClick={() => openRequestDetail(row.requestId)}
+                    >
+                      <td className="py-2 font-mono text-xs">{row.requestId}</td>
+                      <td className="py-2">{formatMs(row.durationMs)}</td>
+                      <td className="py-2">{row.statusCode}</td>
+                      <td className="py-2 text-xs">{row.deploymentVersion || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </Section>
+          ) : null}
+        </div>
+      ) : null}
+
+      {!loading && tab === 'alerts' ? (
+        <div className="space-y-4">
+          {alerts.length ? alerts.map((alert) => (
+            <div key={alert.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="font-medium text-slate-900">{alert.message}</p>
+                  <p className="mt-1 text-sm text-slate-600">
+                    {alert.endpoint} · {alert.metric.toUpperCase()} · {alert.sloTarget}
+                  </p>
+                </div>
+                <SloStatusBadge status={alert.status} />
+              </div>
+              <dl className="mt-3 grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
+                <div><dt className="text-slate-500">Current</dt><dd>{alert.metric === 'availability' ? `${alert.currentValue}%` : formatMs(alert.currentValue)}</dd></div>
+                <div><dt className="text-slate-500">Budget</dt><dd>{alert.metric === 'availability' ? `${alert.budgetValue}%` : formatMs(alert.budgetValue)}</dd></div>
+                <div><dt className="text-slate-500">Started</dt><dd>{formatTime(alert.violationStartedAt)}</dd></div>
+                <div><dt className="text-slate-500">Version</dt><dd>{alert.deploymentVersion || '—'}</dd></div>
+              </dl>
+            </div>
+          )) : <p className="text-sm text-slate-500">No latency alerts in this window.</p>}
+        </div>
+      ) : null}
+
+      {!loading && tab === 'slo' ? (
+        <div className="space-y-6">
+          <div className="flex justify-end">
+            <button
+              type="button"
+              className="rounded-lg bg-slate-900 px-3 py-2 text-sm text-white"
+              onClick={() => setSloForm({ endpoint: '', method: '*', primaryMetric: 'p99', p99BudgetMs: 1500, evaluationWindowDays: 30, alertConsecutiveMinutes: 5 })}
+            >
+              Add SLO
+            </button>
+          </div>
+
+          <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+            <table className="min-w-full text-sm">
+              <thead className="bg-slate-50 text-left text-slate-500">
+                <tr>
+                  <th className="px-4 py-3">Endpoint</th>
+                  <th className="px-4 py-3">SLO Target</th>
+                  <th className="px-4 py-3">Current</th>
+                  <th className="px-4 py-3">Budget Used</th>
+                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {slos.map((slo) => (
+                  <tr key={slo.id} className="border-t border-slate-100">
+                    <td className="px-4 py-3 font-mono text-xs">{slo.method} {slo.endpoint}</td>
+                    <td className="px-4 py-3">{slo.sloTarget}</td>
+                    <td className="px-4 py-3">
+                      {slo.primaryMetric === 'availability'
+                        ? (slo.currentValue != null ? `${slo.currentValue}%` : '—')
+                        : formatMs(slo.currentValue)}
+                    </td>
+                    <td className="px-4 py-3">
+                      {slo.budgetUsedPct != null ? `${slo.budgetUsedPct}%` : '—'}
+                      {slo.budgetDifferenceMs > 0 ? (
+                        <span className="block text-xs text-rose-600">+{formatMs(slo.budgetDifferenceMs)} over budget</span>
+                      ) : null}
+                    </td>
+                    <td className="px-4 py-3"><SloStatusBadge status={slo.status} /></td>
+                    <td className="px-4 py-3">
+                      <button type="button" className="mr-2 text-slate-700 underline" onClick={() => setSloForm({ ...slo })}>Edit</button>
+                      <button type="button" className="text-rose-700 underline" onClick={() => deleteSlo(slo.id)}>Delete</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
+
+      {selectedRequest ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+          <div className="max-h-[85vh] w-full max-w-3xl overflow-y-auto rounded-xl bg-white p-6 shadow-xl">
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900">Request Latency Breakdown</h2>
+                <p className="font-mono text-xs text-slate-500">{selectedRequest.requestId}</p>
+                <p className="mt-1 text-sm text-slate-600">
+                  {selectedRequest.method} {selectedRequest.route} · Total {formatMs(selectedRequest.durationMs)}
+                </p>
+              </div>
+              <button type="button" className="text-sm text-slate-500" onClick={() => setSelectedRequest(null)}>Close</button>
+            </div>
+
+            <div className="space-y-2">
+              {selectedRequest.breakdown?.rows?.map((row) => (
+                <div
+                  key={row.phase}
+                  className={`flex items-center justify-between rounded-lg px-3 py-2 text-sm ${
+                    selectedRequest.breakdown?.bottleneck?.phase === row.phase
+                      ? 'bg-amber-50 ring-1 ring-amber-200'
+                      : 'bg-slate-50'
+                  }`}
+                >
+                  <span>
+                    {row.label}
+                    {selectedRequest.breakdown?.bottleneck?.phase === row.phase ? ' ← Bottleneck' : ''}
+                    {!row.instrumented ? ' (estimated/uninstrumented)' : ''}
+                  </span>
+                  <span className="font-medium">{row.durationMs != null ? formatMs(row.durationMs) : '—'}</span>
+                </div>
+              ))}
+            </div>
+
+            {selectedRequest.breakdown?.details?.database?.length ? (
+              <div className="mt-4">
+                <h3 className="mb-2 text-sm font-semibold text-slate-900">Database</h3>
+                {selectedRequest.breakdown.details.database.map((item) => (
+                  <div key={`${item.label}-${item.durationMs}`} className="flex justify-between text-sm text-slate-600">
+                    <span>{item.label}</span>
+                    <span>{formatMs(item.durationMs)}</span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
+            {selectedRequest.breakdown?.details?.external?.length ? (
+              <div className="mt-4">
+                <h3 className="mb-2 text-sm font-semibold text-slate-900">External API</h3>
+                {selectedRequest.breakdown.details.external.map((item) => (
+                  <div key={`${item.label}-${item.durationMs}`} className="flex justify-between text-sm text-slate-600">
+                    <span>{item.label}</span>
+                    <span>{formatMs(item.durationMs)}</span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
+            {selectedRequest.trace?.traceId ? (
+              <button
+                type="button"
+                className="mt-4 text-sm text-slate-700 underline"
+                onClick={() => { setSelectedRequest(null); openTrace(selectedRequest.trace.traceId); }}
+              >
+                View full trace
+              </button>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {sloForm ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+          <form className="w-full max-w-lg rounded-xl bg-white p-6 shadow-xl" onSubmit={saveSlo}>
+            <h2 className="mb-4 text-lg font-semibold text-slate-900">{sloForm.id ? 'Edit SLO' : 'Add SLO'}</h2>
+            <div className="grid gap-3">
+              <label className="text-sm">
+                <span className="mb-1 block text-slate-500">Endpoint</span>
+                <input className="w-full rounded-lg border border-slate-200 px-3 py-2" value={sloForm.endpoint} onChange={(e) => setSloForm({ ...sloForm, endpoint: e.target.value })} required />
+              </label>
+              <label className="text-sm">
+                <span className="mb-1 block text-slate-500">Method</span>
+                <input className="w-full rounded-lg border border-slate-200 px-3 py-2" value={sloForm.method || '*'} onChange={(e) => setSloForm({ ...sloForm, method: e.target.value })} />
+              </label>
+              <label className="text-sm">
+                <span className="mb-1 block text-slate-500">Primary metric</span>
+                <select className="w-full rounded-lg border border-slate-200 px-3 py-2" value={sloForm.primaryMetric} onChange={(e) => setSloForm({ ...sloForm, primaryMetric: e.target.value })}>
+                  <option value="p99">P99 latency</option>
+                  <option value="p95">P95 latency</option>
+                  <option value="availability">Availability</option>
+                </select>
+              </label>
+              <label className="text-sm">
+                <span className="mb-1 block text-slate-500">P95 budget (ms)</span>
+                <input type="number" className="w-full rounded-lg border border-slate-200 px-3 py-2" value={sloForm.p95BudgetMs ?? ''} onChange={(e) => setSloForm({ ...sloForm, p95BudgetMs: e.target.value ? Number(e.target.value) : undefined })} />
+              </label>
+              <label className="text-sm">
+                <span className="mb-1 block text-slate-500">P99 budget (ms)</span>
+                <input type="number" className="w-full rounded-lg border border-slate-200 px-3 py-2" value={sloForm.p99BudgetMs ?? ''} onChange={(e) => setSloForm({ ...sloForm, p99BudgetMs: e.target.value ? Number(e.target.value) : undefined })} />
+              </label>
+              <label className="text-sm">
+                <span className="mb-1 block text-slate-500">Availability target (%)</span>
+                <input type="number" step="0.1" className="w-full rounded-lg border border-slate-200 px-3 py-2" value={sloForm.availabilityTarget ?? ''} onChange={(e) => setSloForm({ ...sloForm, availabilityTarget: e.target.value ? Number(e.target.value) : undefined })} />
+              </label>
+              <label className="text-sm">
+                <span className="mb-1 block text-slate-500">Alert after consecutive minutes</span>
+                <input type="number" className="w-full rounded-lg border border-slate-200 px-3 py-2" value={sloForm.alertConsecutiveMinutes ?? 5} onChange={(e) => setSloForm({ ...sloForm, alertConsecutiveMinutes: Number(e.target.value) })} />
+              </label>
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <button type="button" className="rounded-lg px-3 py-2 text-sm text-slate-600" onClick={() => setSloForm(null)}>Cancel</button>
+              <button type="submit" className="rounded-lg bg-slate-900 px-3 py-2 text-sm text-white">Save</button>
+            </div>
+          </form>
         </div>
       ) : null}
 

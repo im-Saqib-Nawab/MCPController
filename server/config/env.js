@@ -162,6 +162,7 @@ export const config = {
   mcpServerVersion: process.env.MCP_SERVER_VERSION || '1.1.0',
   logLevel: process.env.LOG_LEVEL || (isProduction || isStaging ? 'info' : 'debug'),
   logSlowRequestMs: Number(process.env.LOG_SLOW_REQUEST_MS) || 2000,
+  latencySampleRate: Number(process.env.LATENCY_SAMPLE_RATE) || 0.1,
   metricsToken: process.env.METRICS_TOKEN || '',
   sentryDsn: process.env.SENTRY_DSN || '',
   testCenterEnabled: process.env.TEST_CENTER_ENABLED === 'true' || isDevelopment || isTest,

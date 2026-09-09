@@ -3,6 +3,7 @@ import {
   logOperation,
   runWithContext
 } from '../lib/request-context.js';
+import { recordLatencySample } from '../lib/latency-sampling.js';
 import { recordHttpRequest } from '../lib/runtime-metrics.js';
 
 function actorFromRequest(req) {
@@ -68,6 +69,8 @@ export function requestLogMiddleware(req, res, next) {
       const durationMs = Date.now() - context.startTime;
       const level =
         res.statusCode >= 500 ? 'error' : res.statusCode >= 400 ? 'warn' : 'info';
+      const deploymentVersion = res.getHeader('x-deployment-version') || undefined;
+      const actor = actorFromRequest(req);
 
       recordHttpRequest({
         method: req.method,
@@ -76,17 +79,27 @@ export function requestLogMiddleware(req, res, next) {
         durationMs
       });
 
-    logOperation(level, 'http.request.completed', {
-      method: req.method,
-      route: req.path,
-      routeKind,
-      statusCode: res.statusCode,
-      durationMs,
-      deploymentVersion: res.getHeader('x-deployment-version') || undefined,
-      servedBy: res.getHeader('x-served-by') || undefined,
-      rolloutAssignment: res.getHeader('x-rollout-assignment') || req.deploymentAssignment || undefined,
-      ...actorFromRequest(req)
-    });
+      void recordLatencySample({
+        requestId: context.requestId,
+        method: req.method,
+        route: req.path,
+        role: actor.role,
+        statusCode: res.statusCode,
+        durationMs,
+        deploymentVersion
+      });
+
+      logOperation(level, 'http.request.completed', {
+        method: req.method,
+        route: req.path,
+        routeKind,
+        statusCode: res.statusCode,
+        durationMs,
+        deploymentVersion,
+        servedBy: res.getHeader('x-served-by') || undefined,
+        rolloutAssignment: res.getHeader('x-rollout-assignment') || req.deploymentAssignment || undefined,
+        ...actor
+      });
     });
 
     next();

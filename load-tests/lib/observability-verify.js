@@ -16,6 +16,15 @@ export async function verifyObservability({ sinceMinutes = 60, sampleRequestIds 
   const metricsRes = await admin.get(`/api/admin/observability/metrics?sinceMinutes=${sinceMinutes}`);
   checks.push(assertCondition('metrics endpoint', metricsRes.ok, `status=${metricsRes.status}`));
 
+  const latencyRes = await admin.get(`/api/admin/observability/latency?sinceMinutes=${sinceMinutes}`);
+  checks.push(assertCondition('latency endpoint', latencyRes.ok, `status=${latencyRes.status}`));
+
+  const sloRes = await admin.get('/api/admin/observability/slo');
+  checks.push(assertCondition('slo endpoint', sloRes.ok, `status=${sloRes.status}`));
+
+  const alertsRes = await admin.get('/api/admin/observability/alerts');
+  checks.push(assertCondition('alerts endpoint', alertsRes.ok, `status=${alertsRes.status}`));
+
   const logsRes = await admin.get(`/api/admin/observability/logs?sinceMinutes=${sinceMinutes}&limit=50`);
   checks.push(assertCondition('logs endpoint', logsRes.ok, `status=${logsRes.status}`));
 
@@ -30,6 +39,13 @@ export async function verifyObservability({ sinceMinutes = 60, sampleRequestIds 
     );
     checks.push(
       assertCondition('database connected', metrics.database?.connected === true, metrics.database?.state)
+    );
+  }
+
+  const latency = latencyRes.data?.latency;
+  if (latency) {
+    checks.push(
+      assertCondition('latency summary has request count', (latency.summary?.requestCount || 0) >= 0)
     );
   }
 
