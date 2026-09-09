@@ -57,11 +57,12 @@ export function requestLogMiddleware(req, res, next) {
   res.setHeader('x-request-id', context.requestId);
 
   runWithContext(context, () => {
-    const routeKind = classifyRoute(req.path);
+    const route = context.route;
+    const routeKind = classifyRoute(route);
 
     logOperation('debug', 'http.request.received', {
       method: req.method,
-      route: req.path,
+      route,
       routeKind,
       ...actorFromRequest(req)
     });
@@ -77,7 +78,7 @@ export function requestLogMiddleware(req, res, next) {
 
       recordHttpRequest({
         method: req.method,
-        route: req.path,
+        route,
         statusCode: res.statusCode,
         durationMs
       });
@@ -85,7 +86,7 @@ export function requestLogMiddleware(req, res, next) {
       void recordLatencySample({
         requestId: context.requestId,
         method: req.method,
-        route: req.path,
+        route,
         action,
         userId: actor.userId || ctx?.actorUserId,
         actorName: actor.actorName || ctx?.actorName,
@@ -97,7 +98,7 @@ export function requestLogMiddleware(req, res, next) {
 
       logOperation(level, 'http.request.completed', {
         method: req.method,
-        route: req.path,
+        route,
         routeKind,
         statusCode: res.statusCode,
         durationMs,

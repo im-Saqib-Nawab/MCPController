@@ -15,15 +15,22 @@ export function getRequestContext() {
   return storage.getStore();
 }
 
+export function resolveRequestRoute(req) {
+  const raw = String(req.originalUrl || req.url || req.path || '/').split('?')[0];
+  return raw || '/';
+}
+
 export function createRequestContext(req) {
   const requestId = String(req.headers['x-request-id'] || randomUUID());
   const childLogger = logger.child({ requestId });
+  const route = resolveRequestRoute(req);
 
   return {
     requestId,
     log: childLogger,
     method: req.method,
-    path: req.path,
+    path: route,
+    route,
     startTime: Date.now()
   };
 }

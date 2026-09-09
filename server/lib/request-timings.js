@@ -68,21 +68,13 @@ export function finalizeRequestTimings(totalDurationMs) {
   if (!ctx) return null;
 
   const timings = ensureTimings(ctx);
-  const phases = { ...timings.phases };
-  const measured = Object.values(phases).reduce((sum, v) => sum + (v || 0), 0);
-  const remainder = Math.max(0, Math.round(totalDurationMs) - measured);
-
-  if (remainder > 0 && !phases.response) {
-    phases.response = remainder;
-  } else if (remainder > 0) {
-    phases.response = (phases.response || 0) + remainder;
-  }
 
   return {
-    phases,
+    phases: { ...timings.phases },
     details: {
       database: [...timings.details.database],
       external: [...timings.details.external]
-    }
+    },
+    totalDurationMs: Math.round(totalDurationMs)
   };
 }

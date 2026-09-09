@@ -451,6 +451,10 @@ app.get('/{*splat}', (req, res, next) => {
    * Express 5 & path-to-regexp safe wildcard handler.
    * Ensures backend routes never serve index.html.
    */
+  if (/\.[a-z0-9]+$/i.test(pathname)) {
+    return next();
+  }
+
   if (
     pathname.startsWith('/api/') ||
     pathname === '/api' ||
@@ -458,7 +462,8 @@ app.get('/{*splat}', (req, res, next) => {
     pathname === '/oauth' ||
     pathname === '/mcp' ||
     pathname.startsWith('/mcp/') ||
-    pathname.startsWith('/.well-known/')
+    pathname.startsWith('/.well-known/') ||
+    pathname.startsWith('/assets/')
   ) {
     return next();
   }

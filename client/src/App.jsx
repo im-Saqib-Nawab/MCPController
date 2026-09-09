@@ -19,8 +19,9 @@ import CreditHistory from './pages/CreditHistory.jsx';
 import Plans from './pages/Plans.jsx';
 import PurchaseSuccess from './pages/PurchaseSuccess.jsx';
 
+import Observability from './pages/Observability.jsx';
+
 const TestingCenter = lazy(() => import('./pages/TestingCenter.jsx'));
-const Observability = lazy(() => import('./pages/Observability.jsx'));
 const AdminCreditsPage = lazy(() => import('./pages/AdminCreditsPage.jsx'));
 const AdminCreditsUsersPage = lazy(() => import('./pages/AdminCreditsUsersPage.jsx'));
 const DeploymentControl = lazy(() => import('./pages/DeploymentControl.jsx'));
@@ -115,9 +116,7 @@ export default function App() {
           path="/admin/observability"
           element={
             <AdminRoute>
-              <Suspense fallback={<PageFallback />}>
-                <Observability />
-              </Suspense>
+              <Observability />
             </AdminRoute>
           }
         />

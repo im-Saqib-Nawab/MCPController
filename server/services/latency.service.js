@@ -137,6 +137,8 @@ export async function getLatencyOverview(_user, filters = {}, sloConfigs = []) {
       endpoint: route,
       method,
       ...stats,
+      requestCount: row.count,
+      errorCount: row.errors,
       errorRate: row.count ? Number(((row.errors / row.count) * 100).toFixed(1)) : 0,
       budgetMs,
       budgetMetric: slo?.primaryMetric || 'p99',
@@ -244,6 +246,10 @@ export async function getRequestLatencyDetail(user, requestId) {
     durationMs: sample?.durationMs || trace?.durationMs,
     deploymentVersion: sample?.deploymentVersion || null,
     timestamp: sample?.createdAt || trace?.timestamp,
+    status:
+      sample?.isError || trace?.status === 'error' || (sample?.statusCode && sample.statusCode >= 400)
+        ? 'error'
+        : 'success',
     breakdown,
     trace: trace
       ? {

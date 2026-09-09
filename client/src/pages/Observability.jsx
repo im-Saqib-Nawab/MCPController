@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import LatencyPanel from '../components/latency/LatencyPanel.jsx';
 import { roleLabel } from '../lib/roles.js';
 import { api, getErrorMessage } from '../services/api.js';
 
@@ -263,6 +264,13 @@ export default function Observability() {
   }
 
   const currentMetrics = tab === 'overview' ? overview?.metrics : metrics;
+
+  const selectedEndpointStats = useMemo(() => {
+    if (!selectedEndpoint || !latency?.endpoints) return null;
+    return latency.endpoints.find(
+      (row) => row.endpoint === selectedEndpoint.endpoint && row.method === selectedEndpoint.method
+    );
+  }, [selectedEndpoint, latency]);
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-8">
@@ -574,125 +582,24 @@ export default function Observability() {
       ) : null}
 
       {!loading && tab === 'latency' && latency ? (
-        <div className="space-y-6">
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-            <MetricCard label="Requests" value={latency.summary.requestCount} hint="Measured from real HTTP/MCP traffic" />
-            <MetricCard label="P50" value={formatMs(latency.summary.p50Ms)} />
-            <MetricCard label="P95" value={formatMs(latency.summary.p95Ms)} />
-            <MetricCard label="P99" value={formatMs(latency.summary.p99Ms)} />
-            <MetricCard label="Errors" value={`${latency.summary.errorRate}%`} />
-          </div>
-
-          <Section title="Recent requests">
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-sm">
-                <thead className="text-left text-slate-500">
-                  <tr>
-                    <th className="py-2 pr-3">Time</th>
-                    <th className="py-2 pr-3">User</th>
-                    <th className="py-2 pr-3">Role</th>
-                    <th className="py-2 pr-3">Action</th>
-                    <th className="py-2 pr-3">Route</th>
-                    <th className="py-2 pr-3">Duration</th>
-                    <th className="py-2 pr-3">Status</th>
-                    <th className="py-2">Request ID</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(latency.recentRequests || []).length ? latency.recentRequests.map((row) => (
-                    <tr
-                      key={row.requestId}
-                      className="cursor-pointer border-t border-slate-100 hover:bg-slate-50"
-                      onClick={() => openRequestDetail(row.requestId)}
-                    >
-                      <td className="py-2 pr-3 whitespace-nowrap">{formatTime(row.timestamp)}</td>
-                      <td className="py-2 pr-3">{row.actorName || '—'}</td>
-                      <td className="py-2 pr-3">{row.role ? roleLabel(row.role) : '—'}</td>
-                      <td className="py-2 pr-3">{row.action || '—'}</td>
-                      <td className="py-2 pr-3 font-mono text-xs">{row.method} {row.route}</td>
-                      <td className="py-2 pr-3 font-medium">{formatMs(row.durationMs)}</td>
-                      <td className="py-2 pr-3"><StatusBadge status={row.status || (row.statusCode >= 400 ? 'error' : 'success')} /></td>
-                      <td className="py-2 font-mono text-xs">{row.requestId}</td>
-                    </tr>
-                  )) : (
-                    <tr>
-                      <td colSpan={8} className="py-4 text-slate-500">No requests match the current filters.</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </Section>
-
-          <Section title="Endpoint Performance">
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-sm">
-                <thead className="text-left text-slate-500">
-                  <tr>
-                    <th className="py-2">Endpoint</th>
-                    <th className="py-2">Method</th>
-                    <th className="py-2">P95</th>
-                    <th className="py-2">P99</th>
-                    <th className="py-2">Budget</th>
-                    <th className="py-2">Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {latency.endpoints.map((row) => (
-                    <tr
-                      key={`${row.method}:${row.endpoint}`}
-                      className="cursor-pointer border-t border-slate-100 hover:bg-slate-50"
-                      onClick={() => openEndpoint(row.endpoint, row.method)}
-                    >
-                      <td className="py-2 font-mono text-xs">{row.endpoint}</td>
-                      <td className="py-2">{row.method}</td>
-                      <td className="py-2">{formatMs(row.p95Ms)}</td>
-                      <td className="py-2">{formatMs(row.p99Ms)}</td>
-                      <td className="py-2">{row.budgetMs ? formatMs(row.budgetMs) : '—'}</td>
-                      <td className="py-2"><SloStatusBadge status={row.status} /></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </Section>
-
-          {selectedEndpoint && slowRequests ? (
-            <Section title={`Slow requests — ${selectedEndpoint.endpoint}`}>
-              <p className="mb-3 text-sm text-slate-600">
-                {slowRequests.metric.toUpperCase()}: {formatMs(slowRequests.metricValueMs)}
-              </p>
-              <table className="min-w-full text-sm">
-                <thead className="text-left text-slate-500">
-                  <tr>
-                    <th className="py-2">Request ID</th>
-                    <th className="py-2">User</th>
-                    <th className="py-2">Action</th>
-                    <th className="py-2">Duration</th>
-                    <th className="py-2">Status</th>
-                    <th className="py-2">Version</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {slowRequests.slowestRequests.map((row) => (
-                    <tr
-                      key={row.requestId}
-                      className="cursor-pointer border-t border-slate-100 hover:bg-slate-50"
-                      onClick={() => openRequestDetail(row.requestId)}
-                    >
-                      <td className="py-2 font-mono text-xs">{row.requestId}</td>
-                      <td className="py-2">{row.actorName || '—'}</td>
-                      <td className="py-2">{row.action || '—'}</td>
-                      <td className="py-2">{formatMs(row.durationMs)}</td>
-                      <td className="py-2"><StatusBadge status={row.status || (row.statusCode >= 400 ? 'error' : 'success')} /></td>
-                      <td className="py-2 text-xs">{row.deploymentVersion || '—'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </Section>
-          ) : null}
-        </div>
+        <LatencyPanel
+          latency={latency}
+          selectedEndpoint={selectedEndpoint}
+          endpointStats={selectedEndpointStats}
+          slowRequests={slowRequests}
+          selectedRequest={selectedRequest}
+          onOpenRequest={openRequestDetail}
+          onCloseRequest={() => setSelectedRequest(null)}
+          onOpenEndpoint={openEndpoint}
+          onCloseEndpoint={() => {
+            setSelectedEndpoint(null);
+            setSlowRequests(null);
+          }}
+          onOpenTrace={(traceId) => {
+            setSelectedRequest(null);
+            openTrace(traceId);
+          }}
+        />
       ) : null}
 
       {!loading && tab === 'alerts' ? (
@@ -786,82 +693,6 @@ export default function Observability() {
                 ))}
               </tbody>
             </table>
-          </div>
-        </div>
-      ) : null}
-
-      {selectedRequest ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
-          <div className="max-h-[85vh] w-full max-w-3xl overflow-y-auto rounded-xl bg-white p-6 shadow-xl">
-            <div className="mb-4 flex items-start justify-between gap-4">
-              <div>
-                <h2 className="text-lg font-semibold text-slate-900">Request Latency Breakdown</h2>
-                <p className="font-mono text-xs text-slate-500">{selectedRequest.requestId}</p>
-                <p className="mt-1 text-sm text-slate-600">
-                  {selectedRequest.method} {selectedRequest.route} · Total {formatMs(selectedRequest.durationMs)}
-                </p>
-                <p className="mt-1 text-sm text-slate-600">
-                  {selectedRequest.actorName || 'Unknown user'}
-                  {selectedRequest.role ? ` · ${roleLabel(selectedRequest.role)}` : ''}
-                  {selectedRequest.action ? ` · ${selectedRequest.action}` : ''}
-                </p>
-              </div>
-              <button type="button" className="text-sm text-slate-500" onClick={() => setSelectedRequest(null)}>Close</button>
-            </div>
-
-            <div className="space-y-2">
-              {selectedRequest.breakdown?.rows?.map((row) => (
-                <div
-                  key={row.phase}
-                  className={`flex items-center justify-between rounded-lg px-3 py-2 text-sm ${
-                    selectedRequest.breakdown?.bottleneck?.phase === row.phase
-                      ? 'bg-amber-50 ring-1 ring-amber-200'
-                      : 'bg-slate-50'
-                  }`}
-                >
-                  <span>
-                    {row.label}
-                    {selectedRequest.breakdown?.bottleneck?.phase === row.phase ? ' ← Bottleneck' : ''}
-                    {!row.instrumented ? ' (estimated/uninstrumented)' : ''}
-                  </span>
-                  <span className="font-medium">{row.durationMs != null ? formatMs(row.durationMs) : '—'}</span>
-                </div>
-              ))}
-            </div>
-
-            {selectedRequest.breakdown?.details?.database?.length ? (
-              <div className="mt-4">
-                <h3 className="mb-2 text-sm font-semibold text-slate-900">Database</h3>
-                {selectedRequest.breakdown.details.database.map((item) => (
-                  <div key={`${item.label}-${item.durationMs}`} className="flex justify-between text-sm text-slate-600">
-                    <span>{item.label}</span>
-                    <span>{formatMs(item.durationMs)}</span>
-                  </div>
-                ))}
-              </div>
-            ) : null}
-
-            {selectedRequest.breakdown?.details?.external?.length ? (
-              <div className="mt-4">
-                <h3 className="mb-2 text-sm font-semibold text-slate-900">External API</h3>
-                {selectedRequest.breakdown.details.external.map((item) => (
-                  <div key={`${item.label}-${item.durationMs}`} className="flex justify-between text-sm text-slate-600">
-                    <span>{item.label}</span>
-                    <span>{formatMs(item.durationMs)}</span>
-                  </div>
-                ))}
-              </div>
-            ) : null}
-
-            {selectedRequest.trace?.traceId ? (
-              <button
-                type="button"
-                className="mt-4 text-sm text-slate-700 underline"
-                onClick={() => { setSelectedRequest(null); openTrace(selectedRequest.trace.traceId); }}
-              >
-                View full trace
-              </button>
-            ) : null}
           </div>
         </div>
       ) : null}
