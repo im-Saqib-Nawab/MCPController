@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import Button from '../components/Button.jsx';
+import { useAuth } from '../context/AuthContext.jsx';
 
 const features = [
   {
@@ -20,7 +21,17 @@ const features = [
   }
 ];
 
-export default function Home({ user }) {
+export default function Home() {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <main className="mx-auto max-w-5xl px-4 py-16">
+        <p className="text-sm text-slate-500">Loading…</p>
+      </main>
+    );
+  }
+
   return (
     <main className="mx-auto max-w-5xl px-4 py-16">
       <section>

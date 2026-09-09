@@ -25,6 +25,8 @@ const requestLatencySampleSchema = new mongoose.Schema(
     method: { type: String, required: true, index: true },
     route: { type: String, required: true, index: true },
     action: String,
+    userId: { type: String, index: true },
+    actorName: String,
     role: { type: String, index: true },
     statusCode: { type: Number, index: true },
     durationMs: { type: Number, required: true, index: true },
@@ -44,6 +46,8 @@ const requestLatencySampleSchema = new mongoose.Schema(
 requestLatencySampleSchema.index({ createdAt: -1 });
 requestLatencySampleSchema.index({ route: 1, createdAt: -1 });
 requestLatencySampleSchema.index({ route: 1, method: 1, createdAt: -1 });
+requestLatencySampleSchema.index({ userId: 1, createdAt: -1 });
+requestLatencySampleSchema.index({ action: 1, createdAt: -1 });
 requestLatencySampleSchema.index({ createdAt: 1 }, { expireAfterSeconds: 60 * 60 * 24 * 7 });
 
 export const RequestLatencySample =

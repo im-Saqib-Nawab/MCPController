@@ -59,6 +59,26 @@ function buildSampleMatch(filters = {}) {
     match.role = String(filters.role);
   }
 
+  if (filters.userId) {
+    match.userId = String(filters.userId);
+  }
+
+  if (filters.action) {
+    match.action = String(filters.action);
+  }
+
+  if (filters.search) {
+    const term = String(filters.search).trim();
+    if (term) {
+      match.$or = [
+        { requestId: term },
+        { actorName: { $regex: term, $options: 'i' } },
+        { route: { $regex: term, $options: 'i' } },
+        { action: { $regex: term, $options: 'i' } }
+      ];
+    }
+  }
+
   return match;
 }
 
@@ -126,6 +146,14 @@ export async function getLatencyOverview(_user, filters = {}, sloConfigs = []) {
     };
   });
 
+  const recentRequests = await RequestLatencySample.find(match)
+    .sort({ createdAt: -1 })
+    .limit(Math.min(Number(filters.limit) || 50, 100))
+    .select(
+      'requestId method route action userId actorName role statusCode durationMs deploymentVersion createdAt isError'
+    )
+    .lean();
+
   return {
     window: { since: match.createdAt.$gte, until: match.createdAt.$lte },
     summary: {
@@ -137,7 +165,21 @@ export async function getLatencyOverview(_user, filters = {}, sloConfigs = []) {
       maxMs: summary.maxMs,
       errorRate: summary.count ? Number(((errorCount / summary.count) * 100).toFixed(1)) : 0
     },
-    endpoints
+    endpoints,
+    recentRequests: recentRequests.map((row) => ({
+      requestId: row.requestId,
+      method: row.method,
+      route: row.route,
+      action: row.action || null,
+      userId: row.userId || null,
+      actorName: row.actorName || null,
+      role: row.role || null,
+      statusCode: row.statusCode,
+      durationMs: row.durationMs,
+      deploymentVersion: row.deploymentVersion || null,
+      timestamp: row.createdAt,
+      status: row.isError ? 'error' : 'success'
+    }))
   };
 }
 
@@ -149,7 +191,9 @@ export async function getEndpointSlowRequests(_user, filters = {}) {
   const rows = await RequestLatencySample.find(match)
     .sort({ durationMs: -1 })
     .limit(limit)
-    .select('requestId durationMs method route statusCode deploymentVersion createdAt')
+    .select(
+      'requestId durationMs method route action userId actorName role statusCode deploymentVersion createdAt isError'
+    )
     .lean();
 
   const stats = computeLatencyStats(rows.map((r) => r.durationMs));
@@ -164,9 +208,14 @@ export async function getEndpointSlowRequests(_user, filters = {}) {
       durationMs: row.durationMs,
       method: row.method,
       route: row.route,
+      action: row.action || null,
+      userId: row.userId || null,
+      actorName: row.actorName || null,
+      role: row.role || null,
       statusCode: row.statusCode,
       deploymentVersion: row.deploymentVersion,
-      timestamp: row.createdAt
+      timestamp: row.createdAt,
+      status: row.isError ? 'error' : 'success'
     }))
   };
 }
@@ -188,6 +237,8 @@ export async function getRequestLatencyDetail(user, requestId) {
     method: sample?.method || trace?.method,
     route: sample?.route || trace?.route,
     action: sample?.action || trace?.action,
+    userId: sample?.userId || trace?.userId,
+    actorName: sample?.actorName || trace?.actorName,
     role: sample?.role || trace?.role,
     statusCode: sample?.statusCode || trace?.statusCode,
     durationMs: sample?.durationMs || trace?.durationMs,

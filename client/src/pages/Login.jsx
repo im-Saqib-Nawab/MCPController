@@ -1,22 +1,35 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import Button from '../components/Button.jsx';
+import { useAuth } from '../context/AuthContext.jsx';
 import { api, getErrorMessage } from '../services/api.js';
 
 export default function Login({ onLoggedIn }) {
   const navigate = useNavigate();
+  const { user, loading: authLoading } = useAuth();
   const [params] = useSearchParams();
   const redirectTarget = params.get('returnTo') || '/dashboard';
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (!authLoading && user) {
+      const safePath = redirectTarget.startsWith('/') ? redirectTarget : '/dashboard';
+      navigate(safePath, { replace: true });
+    }
+  }, [authLoading, user, navigate, redirectTarget]);
+
+  if (authLoading || user) {
+    return <main className="mx-auto max-w-md px-4 py-16 text-sm text-slate-500">Checking session…</main>;
+  }
 
   async function submit(event) {
     event.preventDefault();
     setError('');
-    setLoading(true);
+    setSubmitting(true);
 
     try {
       const { data } = await api.post('/auth/login', { email, password });
@@ -27,7 +40,7 @@ export default function Login({ onLoggedIn }) {
     } catch (err) {
       setError(getErrorMessage(err));
     } finally {
-      setLoading(false);
+      setSubmitting(false);
     }
   }
 
@@ -69,8 +82,8 @@ export default function Login({ onLoggedIn }) {
             <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
           ) : null}
 
-          <Button type="submit" className="w-full" disabled={loading}>
-            {loading ? 'Signing in…' : 'Log in'}
+          <Button type="submit" className="w-full" disabled={submitting}>
+            {submitting ? 'Signing in…' : 'Log in'}
           </Button>
         </form>
 

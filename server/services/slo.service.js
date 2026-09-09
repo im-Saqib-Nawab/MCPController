@@ -122,10 +122,15 @@ function sloToResponse(doc, current = null) {
       doc.primaryMetric !== 'availability' && currentValue != null && budgetMs
         ? Number(((currentValue / budgetMs) * 100).toFixed(1))
         : null,
+    budgetRemainingPct:
+      doc.primaryMetric !== 'availability' && currentValue != null && budgetMs
+        ? Number(Math.max(0, 100 - (currentValue / budgetMs) * 100).toFixed(1))
+        : null,
     budgetDifferenceMs:
       doc.primaryMetric !== 'availability' && currentValue != null && budgetMs
         ? currentValue - budgetMs
         : null,
+    evaluationWindowLabel: `${doc.evaluationWindowDays || 30} days`,
     status: budgetStatus.status,
     statusLabel: budgetStatus.label,
     deploymentVersion: current?.deploymentVersion || null,
@@ -166,10 +171,13 @@ function snapshotSlo(doc) {
 
 export async function listSlos(filters = {}) {
   const docs = await EndpointSlo.find({}).sort({ endpoint: 1, method: 1 }).lean();
-  const sinceMinutes = filters.sinceMinutes || 24 * 60;
+  const defaultSinceMinutes = filters.sinceMinutes || 24 * 60;
 
   const rows = await Promise.all(
     docs.map(async (doc) => {
+      const sinceMinutes = doc.evaluationWindowDays
+        ? doc.evaluationWindowDays * 24 * 60
+        : defaultSinceMinutes;
       const stats = await getEndpointLatencyStats({
         route: doc.endpoint,
         method: doc.method === '*' ? undefined : doc.method,

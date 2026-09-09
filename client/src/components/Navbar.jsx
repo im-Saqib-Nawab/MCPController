@@ -1,9 +1,11 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../services/api.js';
+import { useAuth } from '../context/AuthContext.jsx';
 import CreditBalanceCard from './CreditBalanceCard.jsx';
 
-export default function Navbar({ user, onLogout }) {
+export default function Navbar() {
   const navigate = useNavigate();
+  const { user, loading, setUser } = useAuth();
 
   async function logout() {
     try {
@@ -11,7 +13,7 @@ export default function Navbar({ user, onLogout }) {
     } catch {
       // Local session is still cleared so the user can leave a broken session.
     }
-    onLogout?.();
+    setUser(null);
     navigate('/');
   }
 
@@ -22,7 +24,9 @@ export default function Navbar({ user, onLogout }) {
           MCPController
         </Link>
         <nav className="flex items-center gap-4 text-sm">
-          {user ? (
+          {loading ? (
+            <span className="text-slate-400">Loading…</span>
+          ) : user ? (
             <>
               <Link to="/dashboard" className="text-slate-600 hover:text-slate-900">
                 Dashboard

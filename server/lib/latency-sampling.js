@@ -3,8 +3,12 @@ import { RequestLatencySample } from '../models/RequestLatencySample.js';
 import { upsertLatencyMinuteBucket } from '../models/LatencyMinuteBucket.js';
 import { finalizeRequestTimings } from './request-timings.js';
 
-function shouldSampleRequest({ statusCode, durationMs }) {
+function shouldSampleRequest({ statusCode, durationMs, userId, action }) {
   if (process.env.NODE_ENV === 'test') {
+    return true;
+  }
+
+  if (userId || action) {
     return true;
   }
 
@@ -27,12 +31,14 @@ export async function recordLatencySample({
   method,
   route,
   action,
+  userId,
+  actorName,
   role,
   statusCode,
   durationMs,
   deploymentVersion
 }) {
-  if (!shouldSampleRequest({ statusCode, durationMs })) {
+  if (!shouldSampleRequest({ statusCode, durationMs, userId, action })) {
     return;
   }
 
@@ -44,6 +50,8 @@ export async function recordLatencySample({
     method,
     route,
     action,
+    userId,
+    actorName,
     role,
     statusCode,
     durationMs: Math.round(durationMs),

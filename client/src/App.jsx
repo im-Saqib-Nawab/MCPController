@@ -1,8 +1,9 @@
-import { lazy, Suspense, useEffect, useState } from 'react';
-import { Route, Routes } from 'react-router-dom';
+import { lazy, Suspense } from 'react';
+import { Navigate, Route, Routes } from 'react-router-dom';
 import Navbar from './components/Navbar.jsx';
 import ProtectedRoute from './components/ProtectedRoute.jsx';
 import AdminRoute from './components/AdminRoute.jsx';
+import { useAuth } from './context/AuthContext.jsx';
 import Home from './pages/Home.jsx';
 import Login from './pages/Login.jsx';
 import Register from './pages/Register.jsx';
@@ -17,65 +18,53 @@ import Credits from './pages/Credits.jsx';
 import CreditHistory from './pages/CreditHistory.jsx';
 import Plans from './pages/Plans.jsx';
 import PurchaseSuccess from './pages/PurchaseSuccess.jsx';
-import { api } from './services/api.js';
 
 const TestingCenter = lazy(() => import('./pages/TestingCenter.jsx'));
 const Observability = lazy(() => import('./pages/Observability.jsx'));
 const AdminCreditsPage = lazy(() => import('./pages/AdminCreditsPage.jsx'));
+const AdminCreditsUsersPage = lazy(() => import('./pages/AdminCreditsUsersPage.jsx'));
 const DeploymentControl = lazy(() => import('./pages/DeploymentControl.jsx'));
 
 function PageFallback() {
   return <div className="px-4 py-16 text-center text-sm text-slate-500">Loading…</div>;
 }
 
+function NotFound() {
+  return (
+    <main className="mx-auto max-w-2xl px-4 py-16 text-center">
+      <h1 className="text-2xl font-semibold text-slate-900">Page not found</h1>
+      <p className="mt-2 text-sm text-slate-600">The page you requested does not exist.</p>
+      <a href="/dashboard" className="mt-6 inline-block text-sm text-slate-700 underline hover:text-slate-900">
+        Go to dashboard
+      </a>
+    </main>
+  );
+}
+
 export default function App() {
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    api
-      .get('/auth/me')
-      .then(({ data }) => setUser(data.user))
-      .catch(() => setUser(null))
-      .finally(() => setLoading(false));
-  }, []);
-
-  useEffect(() => {
-    api
-      .get('/health')
-      .then(({ data }) => {
-        if (!data?.publicUrl) {
-          return;
-        }
-
-        const publicOrigin = new URL(data.publicUrl).origin;
-        if (window.location.origin !== publicOrigin) {
-          const nextUrl = `${data.publicUrl}${window.location.pathname}${window.location.search}${window.location.hash}`;
-          window.location.replace(nextUrl);
-        }
-      })
-      .catch(() => {});
-  }, []);
+  const { user, setUser } = useAuth();
 
   return (
     <div className="min-h-screen">
-      <Navbar user={user} onLogout={() => setUser(null)} />
+      <Navbar />
       <Routes>
-        <Route path="/" element={<Home user={user} />} />
+        <Route path="/" element={<Home />} />
         <Route path="/login" element={<Login onLoggedIn={setUser} />} />
         <Route path="/register" element={<Register onRegistered={setUser} />} />
         <Route
           path="/dashboard"
           element={
-            <ProtectedRoute user={user} loading={loading}>
+            <ProtectedRoute>
               <Dashboard user={user} onUserUpdated={setUser} />
             </ProtectedRoute>
           }
         />
+        <Route path="/admin" element={<Navigate to="/dashboard" replace />} />
+        <Route path="/admin/dashboard" element={<Navigate to="/dashboard" replace />} />
         <Route
           path="/doctors"
           element={
-            <ProtectedRoute user={user} loading={loading}>
+            <ProtectedRoute>
               <Doctors />
             </ProtectedRoute>
           }
@@ -83,7 +72,7 @@ export default function App() {
         <Route
           path="/doctors/:doctorId"
           element={
-            <ProtectedRoute user={user} loading={loading}>
+            <ProtectedRoute>
               <DoctorDetail user={user} />
             </ProtectedRoute>
           }
@@ -91,7 +80,7 @@ export default function App() {
         <Route
           path="/medicines"
           element={
-            <ProtectedRoute user={user} loading={loading}>
+            <ProtectedRoute>
               <Medicines user={user} />
             </ProtectedRoute>
           }
@@ -99,7 +88,7 @@ export default function App() {
         <Route
           path="/profile"
           element={
-            <ProtectedRoute user={user} loading={loading}>
+            <ProtectedRoute>
               <Profile user={user} onUserUpdated={setUser} />
             </ProtectedRoute>
           }
@@ -107,7 +96,7 @@ export default function App() {
         <Route
           path="/authorize"
           element={
-            <ProtectedRoute user={user} loading={loading}>
+            <ProtectedRoute>
               <Authorize user={user} />
             </ProtectedRoute>
           }
@@ -115,7 +104,7 @@ export default function App() {
         <Route
           path="/admin/testing"
           element={
-            <AdminRoute user={user} loading={loading}>
+            <AdminRoute>
               <Suspense fallback={<PageFallback />}>
                 <TestingCenter />
               </Suspense>
@@ -125,7 +114,7 @@ export default function App() {
         <Route
           path="/admin/observability"
           element={
-            <AdminRoute user={user} loading={loading}>
+            <AdminRoute>
               <Suspense fallback={<PageFallback />}>
                 <Observability />
               </Suspense>
@@ -135,7 +124,7 @@ export default function App() {
         <Route
           path="/credits"
           element={
-            <ProtectedRoute user={user} loading={loading}>
+            <ProtectedRoute>
               <Credits />
             </ProtectedRoute>
           }
@@ -143,7 +132,7 @@ export default function App() {
         <Route
           path="/credits/history"
           element={
-            <ProtectedRoute user={user} loading={loading}>
+            <ProtectedRoute>
               <CreditHistory />
             </ProtectedRoute>
           }
@@ -151,7 +140,7 @@ export default function App() {
         <Route
           path="/plans"
           element={
-            <ProtectedRoute user={user} loading={loading}>
+            <ProtectedRoute>
               <Plans />
             </ProtectedRoute>
           }
@@ -159,7 +148,7 @@ export default function App() {
         <Route
           path="/purchase/success"
           element={
-            <ProtectedRoute user={user} loading={loading}>
+            <ProtectedRoute>
               <PurchaseSuccess />
             </ProtectedRoute>
           }
@@ -167,7 +156,7 @@ export default function App() {
         <Route
           path="/admin/credits"
           element={
-            <AdminRoute user={user} loading={loading}>
+            <AdminRoute>
               <Suspense fallback={<PageFallback />}>
                 <AdminCreditsPage />
               </Suspense>
@@ -175,9 +164,19 @@ export default function App() {
           }
         />
         <Route
+          path="/admin/credits/users"
+          element={
+            <AdminRoute>
+              <Suspense fallback={<PageFallback />}>
+                <AdminCreditsUsersPage />
+              </Suspense>
+            </AdminRoute>
+          }
+        />
+        <Route
           path="/admin/deployment"
           element={
-            <AdminRoute user={user} loading={loading}>
+            <AdminRoute>
               <Suspense fallback={<PageFallback />}>
                 <DeploymentControl user={user} />
               </Suspense>
@@ -185,6 +184,7 @@ export default function App() {
           }
         />
         <Route path="/oauth/success" element={<Success />} />
+        <Route path="*" element={<NotFound />} />
       </Routes>
     </div>
   );

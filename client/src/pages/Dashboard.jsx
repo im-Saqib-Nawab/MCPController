@@ -1,6 +1,6 @@
 import { lazy, Suspense } from 'react';
+import AdminDashboard from './AdminDashboard.jsx';
 
-const AdminDashboard = lazy(() => import('./AdminDashboard.jsx'));
 const DoctorDashboard = lazy(() => import('./DoctorDashboard.jsx'));
 const PatientDashboard = lazy(() => import('./PatientDashboard.jsx'));
 
@@ -10,11 +10,7 @@ function DashboardFallback() {
 
 export default function Dashboard({ user, onUserUpdated }) {
   if (user?.role === 'admin') {
-    return (
-      <Suspense fallback={<DashboardFallback />}>
-        <AdminDashboard user={user} />
-      </Suspense>
-    );
+    return <AdminDashboard user={user} />;
   }
   if (user?.role === 'doctor') {
     return (

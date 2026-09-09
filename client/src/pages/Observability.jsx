@@ -384,6 +384,10 @@ export default function Observability() {
       {error ? <p className="mb-4 rounded-lg bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p> : null}
       {loading ? <p className="text-sm text-slate-500">Loading observability data…</p> : null}
 
+      {!loading && tab === 'overview' && !overview ? (
+        <p className="text-sm text-slate-500">No overview data available for the selected filters.</p>
+      ) : null}
+
       {!loading && tab === 'overview' && overview ? (
         <div className="space-y-6">
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -565,15 +569,60 @@ export default function Observability() {
         </div>
       ) : null}
 
+      {!loading && tab === 'latency' && !latency ? (
+        <p className="text-sm text-slate-500">No latency data recorded for the selected filters.</p>
+      ) : null}
+
       {!loading && tab === 'latency' && latency ? (
         <div className="space-y-6">
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-            <MetricCard label="Requests" value={latency.summary.requestCount} />
+            <MetricCard label="Requests" value={latency.summary.requestCount} hint="Measured from real HTTP/MCP traffic" />
             <MetricCard label="P50" value={formatMs(latency.summary.p50Ms)} />
             <MetricCard label="P95" value={formatMs(latency.summary.p95Ms)} />
             <MetricCard label="P99" value={formatMs(latency.summary.p99Ms)} />
             <MetricCard label="Errors" value={`${latency.summary.errorRate}%`} />
           </div>
+
+          <Section title="Recent requests">
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead className="text-left text-slate-500">
+                  <tr>
+                    <th className="py-2 pr-3">Time</th>
+                    <th className="py-2 pr-3">User</th>
+                    <th className="py-2 pr-3">Role</th>
+                    <th className="py-2 pr-3">Action</th>
+                    <th className="py-2 pr-3">Route</th>
+                    <th className="py-2 pr-3">Duration</th>
+                    <th className="py-2 pr-3">Status</th>
+                    <th className="py-2">Request ID</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(latency.recentRequests || []).length ? latency.recentRequests.map((row) => (
+                    <tr
+                      key={row.requestId}
+                      className="cursor-pointer border-t border-slate-100 hover:bg-slate-50"
+                      onClick={() => openRequestDetail(row.requestId)}
+                    >
+                      <td className="py-2 pr-3 whitespace-nowrap">{formatTime(row.timestamp)}</td>
+                      <td className="py-2 pr-3">{row.actorName || '—'}</td>
+                      <td className="py-2 pr-3">{row.role ? roleLabel(row.role) : '—'}</td>
+                      <td className="py-2 pr-3">{row.action || '—'}</td>
+                      <td className="py-2 pr-3 font-mono text-xs">{row.method} {row.route}</td>
+                      <td className="py-2 pr-3 font-medium">{formatMs(row.durationMs)}</td>
+                      <td className="py-2 pr-3"><StatusBadge status={row.status || (row.statusCode >= 400 ? 'error' : 'success')} /></td>
+                      <td className="py-2 font-mono text-xs">{row.requestId}</td>
+                    </tr>
+                  )) : (
+                    <tr>
+                      <td colSpan={8} className="py-4 text-slate-500">No requests match the current filters.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </Section>
 
           <Section title="Endpoint Performance">
             <div className="overflow-x-auto">
@@ -615,7 +664,14 @@ export default function Observability() {
               </p>
               <table className="min-w-full text-sm">
                 <thead className="text-left text-slate-500">
-                  <tr><th className="py-2">Request ID</th><th className="py-2">Duration</th><th className="py-2">Status</th><th className="py-2">Version</th></tr>
+                  <tr>
+                    <th className="py-2">Request ID</th>
+                    <th className="py-2">User</th>
+                    <th className="py-2">Action</th>
+                    <th className="py-2">Duration</th>
+                    <th className="py-2">Status</th>
+                    <th className="py-2">Version</th>
+                  </tr>
                 </thead>
                 <tbody>
                   {slowRequests.slowestRequests.map((row) => (
@@ -625,8 +681,10 @@ export default function Observability() {
                       onClick={() => openRequestDetail(row.requestId)}
                     >
                       <td className="py-2 font-mono text-xs">{row.requestId}</td>
+                      <td className="py-2">{row.actorName || '—'}</td>
+                      <td className="py-2">{row.action || '—'}</td>
                       <td className="py-2">{formatMs(row.durationMs)}</td>
-                      <td className="py-2">{row.statusCode}</td>
+                      <td className="py-2"><StatusBadge status={row.status || (row.statusCode >= 400 ? 'error' : 'success')} /></td>
                       <td className="py-2 text-xs">{row.deploymentVersion || '—'}</td>
                     </tr>
                   ))}
@@ -639,22 +697,31 @@ export default function Observability() {
 
       {!loading && tab === 'alerts' ? (
         <div className="space-y-4">
+          <p className="text-sm text-slate-600">
+            Alerts are evaluated from real minute-level latency buckets against configured SLO targets.
+          </p>
           {alerts.length ? alerts.map((alert) => (
-            <div key={alert.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div
+              key={alert.id}
+              className={`rounded-xl border bg-white p-4 shadow-sm ${
+                alert.status === 'violating' ? 'border-rose-200' : 'border-slate-200'
+              }`}
+            >
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <p className="font-medium text-slate-900">{alert.message}</p>
                   <p className="mt-1 text-sm text-slate-600">
-                    {alert.endpoint} · {alert.metric.toUpperCase()} · {alert.sloTarget}
+                    {alert.method} {alert.endpoint} · {alert.metric.toUpperCase()} · {alert.sloTarget}
                   </p>
                 </div>
                 <SloStatusBadge status={alert.status} />
               </div>
-              <dl className="mt-3 grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
-                <div><dt className="text-slate-500">Current</dt><dd>{alert.metric === 'availability' ? `${alert.currentValue}%` : formatMs(alert.currentValue)}</dd></div>
+              <dl className="mt-3 grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-5">
+                <div><dt className="text-slate-500">Current value</dt><dd className="font-medium">{alert.metric === 'availability' ? `${alert.currentValue}%` : formatMs(alert.currentValue)}</dd></div>
                 <div><dt className="text-slate-500">Budget</dt><dd>{alert.metric === 'availability' ? `${alert.budgetValue}%` : formatMs(alert.budgetValue)}</dd></div>
-                <div><dt className="text-slate-500">Started</dt><dd>{formatTime(alert.violationStartedAt)}</dd></div>
-                <div><dt className="text-slate-500">Version</dt><dd>{alert.deploymentVersion || '—'}</dd></div>
+                <div><dt className="text-slate-500">Violation started</dt><dd>{formatTime(alert.violationStartedAt)}</dd></div>
+                <div><dt className="text-slate-500">Duration</dt><dd>{alert.violationDurationMs ? formatMs(alert.violationDurationMs) : '—'}</dd></div>
+                <div><dt className="text-slate-500">Deployment</dt><dd>{alert.deploymentVersion || '—'}</dd></div>
               </dl>
             </div>
           )) : <p className="text-sm text-slate-500">No latency alerts in this window.</p>}
@@ -663,6 +730,9 @@ export default function Observability() {
 
       {!loading && tab === 'slo' ? (
         <div className="space-y-6">
+          <p className="text-sm text-slate-600">
+            SLO status and budget usage are calculated from recorded request latency over each SLO&apos;s evaluation window.
+          </p>
           <div className="flex justify-end">
             <button
               type="button"
@@ -679,8 +749,10 @@ export default function Observability() {
                 <tr>
                   <th className="px-4 py-3">Endpoint</th>
                   <th className="px-4 py-3">SLO Target</th>
+                  <th className="px-4 py-3">Window</th>
                   <th className="px-4 py-3">Current</th>
                   <th className="px-4 py-3">Budget Used</th>
+                  <th className="px-4 py-3">Remaining</th>
                   <th className="px-4 py-3">Status</th>
                   <th className="px-4 py-3">Actions</th>
                 </tr>
@@ -690,6 +762,7 @@ export default function Observability() {
                   <tr key={slo.id} className="border-t border-slate-100">
                     <td className="px-4 py-3 font-mono text-xs">{slo.method} {slo.endpoint}</td>
                     <td className="px-4 py-3">{slo.sloTarget}</td>
+                    <td className="px-4 py-3 text-xs text-slate-600">{slo.evaluationWindowLabel || '30 days'}</td>
                     <td className="px-4 py-3">
                       {slo.primaryMetric === 'availability'
                         ? (slo.currentValue != null ? `${slo.currentValue}%` : '—')
@@ -700,6 +773,9 @@ export default function Observability() {
                       {slo.budgetDifferenceMs > 0 ? (
                         <span className="block text-xs text-rose-600">+{formatMs(slo.budgetDifferenceMs)} over budget</span>
                       ) : null}
+                    </td>
+                    <td className="px-4 py-3">
+                      {slo.budgetRemainingPct != null ? `${slo.budgetRemainingPct}%` : '—'}
                     </td>
                     <td className="px-4 py-3"><SloStatusBadge status={slo.status} /></td>
                     <td className="px-4 py-3">
@@ -723,6 +799,11 @@ export default function Observability() {
                 <p className="font-mono text-xs text-slate-500">{selectedRequest.requestId}</p>
                 <p className="mt-1 text-sm text-slate-600">
                   {selectedRequest.method} {selectedRequest.route} · Total {formatMs(selectedRequest.durationMs)}
+                </p>
+                <p className="mt-1 text-sm text-slate-600">
+                  {selectedRequest.actorName || 'Unknown user'}
+                  {selectedRequest.role ? ` · ${roleLabel(selectedRequest.role)}` : ''}
+                  {selectedRequest.action ? ` · ${selectedRequest.action}` : ''}
                 </p>
               </div>
               <button type="button" className="text-sm text-slate-500" onClick={() => setSelectedRequest(null)}>Close</button>

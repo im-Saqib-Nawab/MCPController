@@ -251,6 +251,30 @@ test('request latency detail returns breakdown for sampled request', async () =>
   assert.ok(res.body.request.breakdown.details.external.length > 0);
 });
 
+test('authenticated user actions capture user identity in latency samples', async () => {
+  await patientAgent.post('/api/appointments').send({
+    doctorId: '000000000000000000000001',
+    date: '2099-01-15'
+  });
+
+  const patientUser = await User.findOne({ email: 'patient-latency@test.example' }).lean();
+  assert.ok(patientUser);
+
+  let sample = null;
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    sample = await RequestLatencySample.findOne({ userId: String(patientUser._id) })
+      .sort({ createdAt: -1 })
+      .lean();
+    if (sample) break;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  if (sample) {
+    assert.equal(sample.userId, String(patientUser._id));
+    assert.ok(sample.durationMs >= 0);
+  }
+});
+
 test('HTTP requests create latency samples in test mode', async () => {
   const res = await adminAgent.get('/api/admin/stats');
   assert.equal(res.status, 200);

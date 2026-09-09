@@ -1,5 +1,6 @@
 import {
   createRequestContext,
+  getRequestContext,
   logOperation,
   runWithContext
 } from '../lib/request-context.js';
@@ -71,6 +72,8 @@ export function requestLogMiddleware(req, res, next) {
         res.statusCode >= 500 ? 'error' : res.statusCode >= 400 ? 'warn' : 'info';
       const deploymentVersion = res.getHeader('x-deployment-version') || undefined;
       const actor = actorFromRequest(req);
+      const ctx = getRequestContext();
+      const action = req.auditAction || ctx?.auditAction || undefined;
 
       recordHttpRequest({
         method: req.method,
@@ -83,7 +86,10 @@ export function requestLogMiddleware(req, res, next) {
         requestId: context.requestId,
         method: req.method,
         route: req.path,
-        role: actor.role,
+        action,
+        userId: actor.userId || ctx?.actorUserId,
+        actorName: actor.actorName || ctx?.actorName,
+        role: actor.role || ctx?.actorRole,
         statusCode: res.statusCode,
         durationMs,
         deploymentVersion

@@ -1,10 +1,12 @@
 import { Navigate, useLocation } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext.jsx';
 
-export default function AdminRoute({ user, loading, children }) {
+export default function AdminRoute({ children }) {
+  const { user, loading } = useAuth();
   const location = useLocation();
 
   if (loading) {
-    return <div className="px-4 py-16 text-center text-sm text-slate-500">Loading…</div>;
+    return <div className="px-4 py-16 text-center text-sm text-slate-500">Checking admin access…</div>;
   }
 
   if (!user) {

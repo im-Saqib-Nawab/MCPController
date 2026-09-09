@@ -13,6 +13,9 @@ function parseLatencyFilters(query = {}) {
     statusCode: query.statusCode ? Number(query.statusCode) : undefined,
     deploymentVersion: query.deploymentVersion,
     role: query.role,
+    userId: query.userId,
+    action: query.action,
+    search: query.search,
     metric: query.metric,
     limit: query.limit ? Number(query.limit) : undefined
   };

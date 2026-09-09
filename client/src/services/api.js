@@ -21,6 +21,8 @@ function readCsrfToken() {
  * Secrets such as JWT_SECRET, MONGODB_URI and ADMIN_PASSWORD
  * must NEVER be exposed here.
  */
+let unauthorizedHandler = null;
+
 export const api = axios.create({
   baseURL: '/api',
   withCredentials: true,
@@ -29,6 +31,10 @@ export const api = axios.create({
     Accept: 'application/json'
   }
 });
+
+api.setUnauthorizedHandler = (handler) => {
+  unauthorizedHandler = typeof handler === 'function' ? handler : null;
+};
 
 api.interceptors.request.use((requestConfig) => {
   const method = String(requestConfig.method || 'get').toLowerCase();
@@ -40,6 +46,21 @@ api.interceptors.request.use((requestConfig) => {
   }
   return requestConfig;
 });
+
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    const status = error?.response?.status;
+    const url = String(error?.config?.url || '');
+    const isAuthMe = url.endsWith('/auth/me') || url.includes('/auth/me?');
+
+    if (status === 401 && !isAuthMe) {
+      unauthorizedHandler?.();
+    }
+
+    return Promise.reject(error);
+  }
+);
 
 function readApiErrorPayload(error) {
   const data = error?.response?.data;

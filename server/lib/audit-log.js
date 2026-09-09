@@ -1,4 +1,4 @@
-import { logOperation, logError } from './request-context.js';
+import { logOperation, logError, getRequestContext } from './request-context.js';
 import { roleLabel } from './roles.js';
 
 export const MCP_ACTION_LABELS = {
@@ -78,6 +78,13 @@ export function logAudit(user, action, options = {}) {
   const role = user?.role || rest.role;
   const userId = user?._id ? String(user._id) : user?.id ? String(user.id) : rest.userId;
   const message = formatAuditMessage({ actorName, role, action, status });
+  const ctx = getRequestContext();
+  if (ctx) {
+    ctx.auditAction = action;
+    ctx.actorUserId = userId;
+    ctx.actorName = actorName;
+    ctx.actorRole = role;
+  }
 
   logOperation(level, `audit.${slugify(action)}`, {
     category: 'audit',

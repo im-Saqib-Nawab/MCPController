@@ -173,10 +173,23 @@ export async function evaluateLatencyAlerts() {
   return results;
 }
 
+function sinceDateFromFilters(filters = {}) {
+  if (filters.sinceMinutes) {
+    const sinceMinutes = Number(filters.sinceMinutes);
+    if (Number.isFinite(sinceMinutes) && sinceMinutes > 0) {
+      return new Date(Date.now() - sinceMinutes * 60 * 1000);
+    }
+  }
+
+  return new Date(Date.now() - 24 * 60 * 60 * 1000);
+}
+
 export async function listAlerts(filters = {}) {
   await evaluateLatencyAlerts();
 
-  const query = {};
+  const query = {
+    updatedAt: { $gte: sinceDateFromFilters(filters) }
+  };
   if (filters.status) {
     query.status = String(filters.status);
   }
