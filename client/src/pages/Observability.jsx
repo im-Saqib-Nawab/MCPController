@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import AlertsPanel from '../components/latency/AlertsPanel.jsx';
 import LatencyPanel from '../components/latency/LatencyPanel.jsx';
+import SloBudgetPanel from '../components/latency/SloBudgetPanel.jsx';
 import { roleLabel } from '../lib/roles.js';
 import { api, getErrorMessage } from '../services/api.js';
 
@@ -63,6 +65,7 @@ function SloStatusBadge({ status }) {
     violating: 'bg-rose-100 text-rose-800',
     warning: 'bg-amber-100 text-amber-800',
     resolved: 'bg-slate-100 text-slate-700',
+    no_data: 'bg-slate-100 text-slate-600',
     unknown: 'bg-slate-100 text-slate-600'
   };
   const labels = {
@@ -70,6 +73,7 @@ function SloStatusBadge({ status }) {
     violating: 'Violating',
     warning: 'Warning',
     resolved: 'Resolved',
+    no_data: 'No data',
     unknown: 'Unknown'
   };
   return (
@@ -602,99 +606,24 @@ export default function Observability() {
         />
       ) : null}
 
-      {!loading && tab === 'alerts' ? (
-        <div className="space-y-4">
-          <p className="text-sm text-slate-600">
-            Alerts are evaluated from real minute-level latency buckets against configured SLO targets.
-          </p>
-          {alerts.length ? alerts.map((alert) => (
-            <div
-              key={alert.id}
-              className={`rounded-xl border bg-white p-4 shadow-sm ${
-                alert.status === 'violating' ? 'border-rose-200' : 'border-slate-200'
-              }`}
-            >
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <p className="font-medium text-slate-900">{alert.message}</p>
-                  <p className="mt-1 text-sm text-slate-600">
-                    {alert.method} {alert.endpoint} · {alert.metric.toUpperCase()} · {alert.sloTarget}
-                  </p>
-                </div>
-                <SloStatusBadge status={alert.status} />
-              </div>
-              <dl className="mt-3 grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-5">
-                <div><dt className="text-slate-500">Current value</dt><dd className="font-medium">{alert.metric === 'availability' ? `${alert.currentValue}%` : formatMs(alert.currentValue)}</dd></div>
-                <div><dt className="text-slate-500">Budget</dt><dd>{alert.metric === 'availability' ? `${alert.budgetValue}%` : formatMs(alert.budgetValue)}</dd></div>
-                <div><dt className="text-slate-500">Violation started</dt><dd>{formatTime(alert.violationStartedAt)}</dd></div>
-                <div><dt className="text-slate-500">Duration</dt><dd>{alert.violationDurationMs ? formatMs(alert.violationDurationMs) : '—'}</dd></div>
-                <div><dt className="text-slate-500">Deployment</dt><dd>{alert.deploymentVersion || '—'}</dd></div>
-              </dl>
-            </div>
-          )) : <p className="text-sm text-slate-500">No latency alerts in this window.</p>}
-        </div>
-      ) : null}
+      {!loading && tab === 'alerts' ? <AlertsPanel alerts={alerts} /> : null}
 
       {!loading && tab === 'slo' ? (
-        <div className="space-y-6">
-          <p className="text-sm text-slate-600">
-            SLO status and budget usage are calculated from recorded request latency over each SLO&apos;s evaluation window.
-          </p>
-          <div className="flex justify-end">
-            <button
-              type="button"
-              className="rounded-lg bg-slate-900 px-3 py-2 text-sm text-white"
-              onClick={() => setSloForm({ endpoint: '', method: '*', primaryMetric: 'p99', p99BudgetMs: 1500, evaluationWindowDays: 30, alertConsecutiveMinutes: 5 })}
-            >
-              Add SLO
-            </button>
-          </div>
-
-          <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-            <table className="min-w-full text-sm">
-              <thead className="bg-slate-50 text-left text-slate-500">
-                <tr>
-                  <th className="px-4 py-3">Endpoint</th>
-                  <th className="px-4 py-3">SLO Target</th>
-                  <th className="px-4 py-3">Window</th>
-                  <th className="px-4 py-3">Current</th>
-                  <th className="px-4 py-3">Budget Used</th>
-                  <th className="px-4 py-3">Remaining</th>
-                  <th className="px-4 py-3">Status</th>
-                  <th className="px-4 py-3">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {slos.map((slo) => (
-                  <tr key={slo.id} className="border-t border-slate-100">
-                    <td className="px-4 py-3 font-mono text-xs">{slo.method} {slo.endpoint}</td>
-                    <td className="px-4 py-3">{slo.sloTarget}</td>
-                    <td className="px-4 py-3 text-xs text-slate-600">{slo.evaluationWindowLabel || '30 days'}</td>
-                    <td className="px-4 py-3">
-                      {slo.primaryMetric === 'availability'
-                        ? (slo.currentValue != null ? `${slo.currentValue}%` : '—')
-                        : formatMs(slo.currentValue)}
-                    </td>
-                    <td className="px-4 py-3">
-                      {slo.budgetUsedPct != null ? `${slo.budgetUsedPct}%` : '—'}
-                      {slo.budgetDifferenceMs > 0 ? (
-                        <span className="block text-xs text-rose-600">+{formatMs(slo.budgetDifferenceMs)} over budget</span>
-                      ) : null}
-                    </td>
-                    <td className="px-4 py-3">
-                      {slo.budgetRemainingPct != null ? `${slo.budgetRemainingPct}%` : '—'}
-                    </td>
-                    <td className="px-4 py-3"><SloStatusBadge status={slo.status} /></td>
-                    <td className="px-4 py-3">
-                      <button type="button" className="mr-2 text-slate-700 underline" onClick={() => setSloForm({ ...slo })}>Edit</button>
-                      <button type="button" className="text-rose-700 underline" onClick={() => deleteSlo(slo.id)}>Delete</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        <SloBudgetPanel
+          slos={slos}
+          onAdd={() =>
+            setSloForm({
+              endpoint: '*',
+              method: '*',
+              primaryMetric: 'p99',
+              p99BudgetMs: 1000,
+              evaluationWindowDays: 30,
+              alertConsecutiveMinutes: 5
+            })
+          }
+          onEdit={(slo) => setSloForm({ ...slo })}
+          onDelete={deleteSlo}
+        />
       ) : null}
 
       {sloForm ? (
@@ -704,11 +633,33 @@ export default function Observability() {
             <div className="grid gap-3">
               <label className="text-sm">
                 <span className="mb-1 block text-slate-500">Endpoint</span>
-                <input className="w-full rounded-lg border border-slate-200 px-3 py-2" value={sloForm.endpoint} onChange={(e) => setSloForm({ ...sloForm, endpoint: e.target.value })} required />
+                <input
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2"
+                  placeholder="* or /api/appointments"
+                  value={sloForm.endpoint}
+                  onChange={(e) => setSloForm({ ...sloForm, endpoint: e.target.value })}
+                  required
+                />
+                <span className="mt-1 block text-xs text-slate-500">Use * for all routes, or a path prefix such as /api/appointments.</span>
               </label>
               <label className="text-sm">
                 <span className="mb-1 block text-slate-500">Method</span>
-                <input className="w-full rounded-lg border border-slate-200 px-3 py-2" value={sloForm.method || '*'} onChange={(e) => setSloForm({ ...sloForm, method: e.target.value })} />
+                <input
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2"
+                  placeholder="* or POST"
+                  value={sloForm.method || '*'}
+                  onChange={(e) => setSloForm({ ...sloForm, method: e.target.value })}
+                />
+                <span className="mt-1 block text-xs text-slate-500">Use * for all HTTP methods.</span>
+              </label>
+              <label className="text-sm">
+                <span className="mb-1 block text-slate-500">Evaluation window (days)</span>
+                <input
+                  type="number"
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2"
+                  value={sloForm.evaluationWindowDays ?? 30}
+                  onChange={(e) => setSloForm({ ...sloForm, evaluationWindowDays: Number(e.target.value) })}
+                />
               </label>
               <label className="text-sm">
                 <span className="mb-1 block text-slate-500">Primary metric</span>
@@ -731,8 +682,9 @@ export default function Observability() {
                 <input type="number" step="0.1" className="w-full rounded-lg border border-slate-200 px-3 py-2" value={sloForm.availabilityTarget ?? ''} onChange={(e) => setSloForm({ ...sloForm, availabilityTarget: e.target.value ? Number(e.target.value) : undefined })} />
               </label>
               <label className="text-sm">
-                <span className="mb-1 block text-slate-500">Alert after consecutive minutes</span>
+                <span className="mb-1 block text-slate-500">Alert lookback (minutes)</span>
                 <input type="number" className="w-full rounded-lg border border-slate-200 px-3 py-2" value={sloForm.alertConsecutiveMinutes ?? 5} onChange={(e) => setSloForm({ ...sloForm, alertConsecutiveMinutes: Number(e.target.value) })} />
+                <span className="mt-1 block text-xs text-slate-500">Alerts evaluate recorded requests within this recent time window.</span>
               </label>
             </div>
             <div className="mt-4 flex justify-end gap-2">

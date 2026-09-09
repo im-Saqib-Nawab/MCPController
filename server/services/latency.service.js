@@ -1,4 +1,5 @@
 import { computeLatencyStats } from '../lib/percentile.js';
+import { buildSloMatch } from '../lib/slo-matching.js';
 import { buildTimingBreakdown } from '../lib/timing-breakdown.js';
 import { RequestLatencySample } from '../models/RequestLatencySample.js';
 import { getTrace } from './observability.service.js';
@@ -82,15 +83,17 @@ function buildSampleMatch(filters = {}) {
   return match;
 }
 
-function sloStatus(actualMs, budgetMs) {
-  if (!budgetMs || !actualMs) return 'unknown';
+function sloStatus(actualMs, budgetMs, sampleCount = 0) {
+  if (!budgetMs) return 'unknown';
+  if (!sampleCount || actualMs == null) return 'no_data';
   if (actualMs <= budgetMs) return 'healthy';
   return 'violating';
 }
 
-function formatBudgetStatus(actualMs, budgetMs) {
-  const status = sloStatus(actualMs, budgetMs);
-  if (status === 'unknown') return { status, label: '—' };
+function formatBudgetStatus(actualMs, budgetMs, sampleCount = 0) {
+  const status = sloStatus(actualMs, budgetMs, sampleCount);
+  if (status === 'no_data') return { status, label: 'No data' };
+  if (status === 'unknown') return { status, label: 'Unknown' };
   return { status, label: status === 'healthy' ? 'Healthy' : 'Violating' };
 }
 
@@ -262,8 +265,22 @@ export async function getRequestLatencyDetail(user, requestId) {
   };
 }
 
+function buildStatsMatch(filters = {}) {
+  if (filters.sloEndpoint != null) {
+    return {
+      createdAt: {
+        $gte: sinceDate(filters),
+        $lte: untilDate(filters)
+      },
+      ...buildSloMatch(filters.sloEndpoint, filters.sloMethod || '*')
+    };
+  }
+
+  return buildSampleMatch(filters);
+}
+
 export async function getEndpointLatencyStats(filters = {}) {
-  const match = buildSampleMatch(filters);
+  const match = buildStatsMatch(filters);
   const rows = await RequestLatencySample.find(match).select('durationMs isError deploymentVersion').lean();
   const stats = computeLatencyStats(rows.map((r) => r.durationMs));
   const errors = rows.filter((r) => r.isError).length;
@@ -275,4 +292,4 @@ export async function getEndpointLatencyStats(filters = {}) {
   };
 }
 
-export { sloStatus, formatBudgetStatus, sinceDate, buildSampleMatch };
+export { sloStatus, formatBudgetStatus, sinceDate, buildSampleMatch, buildStatsMatch };

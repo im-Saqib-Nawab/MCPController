@@ -152,6 +152,57 @@ test('creating and updating SLO writes audit log', async () => {
   assert.ok(auditRes.body.audit[0].adminName);
 });
 
+test('wildcard SLO matches all recorded routes and reports current latency', async () => {
+  await RequestLatencySample.create({
+    requestId: 'req-wildcard-1',
+    method: 'POST',
+    route: '/api/appointments/abc123/cancel',
+    durationMs: 1500,
+    statusCode: 200
+  });
+
+  await EndpointSlo.create({
+    endpoint: '*',
+    method: '*',
+    enabled: true,
+    primaryMetric: 'p99',
+    p99BudgetMs: 1000,
+    evaluationWindowDays: 30,
+    alertConsecutiveMinutes: 5
+  });
+
+  const res = await adminAgent.get('/api/admin/observability/slo');
+  assert.equal(res.status, 200);
+  const slo = res.body.slos.find((row) => row.endpoint === '*');
+  assert.ok(slo);
+  assert.ok(slo.sampleCount >= 1);
+  assert.equal(slo.currentValue, 1500);
+  assert.equal(slo.status, 'violating');
+});
+
+test('sample-based alert fires when wildcard SLO exceeds budget', async () => {
+  await RequestLatencySample.create({
+    requestId: 'req-alert-sample-1',
+    method: 'POST',
+    route: '/api/appointments/abc123/cancel',
+    durationMs: 1500,
+    statusCode: 200
+  });
+
+  await EndpointSlo.create({
+    endpoint: '*',
+    method: '*',
+    enabled: true,
+    primaryMetric: 'p99',
+    p99BudgetMs: 1000,
+    alertConsecutiveMinutes: 5
+  });
+
+  const res = await adminAgent.get('/api/admin/observability/alerts');
+  assert.equal(res.status, 200);
+  assert.ok(res.body.alerts.some((alert) => alert.status === 'violating'));
+});
+
 test('latency alert is created after consecutive SLO violations', async () => {
   await EndpointSlo.create({
     endpoint: '/mcp',

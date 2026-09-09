@@ -1,24 +1,22 @@
 import { AppError } from '../middleware/error.middleware.js';
 import { getRequestContext } from '../lib/request-context.js';
+import {
+  formatSloEndpointLabel,
+  formatSloMethodLabel,
+  normalizeSloEndpoint,
+  normalizeSloMethod
+} from '../lib/slo-matching.js';
 import { EndpointSlo } from '../models/EndpointSlo.js';
 import { EndpointSloAudit } from '../models/EndpointSloAudit.js';
 import { formatBudgetStatus, getEndpointLatencyStats } from './latency.service.js';
 
-function normalizeEndpoint(endpoint = '') {
-  const value = String(endpoint).trim();
-  if (!value.startsWith('/')) {
-    return `/${value}`;
-  }
-  return value;
-}
-
 function validateSloInput(input = {}) {
-  const endpoint = normalizeEndpoint(input.endpoint);
-  if (!endpoint || endpoint === '/') {
+  const endpoint = normalizeSloEndpoint(input.endpoint);
+  if (!endpoint) {
     throw new AppError(400, 'invalid_slo', 'Endpoint is required.');
   }
 
-  const method = String(input.method || '*').trim().toUpperCase() || '*';
+  const method = normalizeSloMethod(input.method);
   const p95BudgetMs = input.p95BudgetMs != null ? Number(input.p95BudgetMs) : undefined;
   const p99BudgetMs = input.p99BudgetMs != null ? Number(input.p99BudgetMs) : undefined;
   const availabilityTarget =
@@ -91,19 +89,22 @@ function sloToResponse(doc, current = null) {
         ? current?.p99Ms
         : current?.availabilityPct;
 
+  const sampleCount = current?.count ?? 0;
   const budgetStatus =
     doc.primaryMetric === 'availability'
-      ? currentValue != null && budgetMs != null
+      ? sampleCount > 0 && currentValue != null && budgetMs != null
         ? currentValue >= budgetMs
           ? { status: 'healthy', label: 'Healthy' }
           : { status: 'violating', label: 'Violating' }
-        : { status: 'unknown', label: '—' }
-      : formatBudgetStatus(currentValue, budgetMs);
+        : { status: 'no_data', label: 'No data' }
+      : formatBudgetStatus(currentValue, budgetMs, sampleCount);
 
   return {
     id: String(doc._id),
     endpoint: doc.endpoint,
+    endpointLabel: formatSloEndpointLabel(doc.endpoint),
     method: doc.method,
+    methodLabel: formatSloMethodLabel(doc.method),
     enabled: doc.enabled,
     p95BudgetMs: doc.p95BudgetMs ?? null,
     p99BudgetMs: doc.p99BudgetMs ?? null,
@@ -118,21 +119,24 @@ function sloToResponse(doc, current = null) {
         : `${doc.primaryMetric.toUpperCase()} < ${budgetMs}ms`,
     currentValue,
     budgetMs,
+    sampleCount,
     budgetUsedPct:
-      doc.primaryMetric !== 'availability' && currentValue != null && budgetMs
+      doc.primaryMetric !== 'availability' && sampleCount > 0 && currentValue != null && budgetMs
         ? Number(((currentValue / budgetMs) * 100).toFixed(1))
         : null,
     budgetRemainingPct:
-      doc.primaryMetric !== 'availability' && currentValue != null && budgetMs
+      doc.primaryMetric !== 'availability' && sampleCount > 0 && currentValue != null && budgetMs
         ? Number(Math.max(0, 100 - (currentValue / budgetMs) * 100).toFixed(1))
         : null,
     budgetDifferenceMs:
-      doc.primaryMetric !== 'availability' && currentValue != null && budgetMs
+      doc.primaryMetric !== 'availability' && sampleCount > 0 && currentValue != null && budgetMs
         ? currentValue - budgetMs
         : null,
+    evaluationWindowDays: doc.evaluationWindowDays || 30,
     evaluationWindowLabel: `${doc.evaluationWindowDays || 30} days`,
     status: budgetStatus.status,
     statusLabel: budgetStatus.label,
+    maxMs: current?.maxMs ?? null,
     deploymentVersion: current?.deploymentVersion || null,
     updatedAt: doc.updatedAt,
     createdAt: doc.createdAt
@@ -179,8 +183,8 @@ export async function listSlos(filters = {}) {
         ? doc.evaluationWindowDays * 24 * 60
         : defaultSinceMinutes;
       const stats = await getEndpointLatencyStats({
-        route: doc.endpoint,
-        method: doc.method === '*' ? undefined : doc.method,
+        sloEndpoint: doc.endpoint,
+        sloMethod: doc.method,
         sinceMinutes
       });
 

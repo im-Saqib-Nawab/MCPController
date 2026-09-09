@@ -1,34 +1,129 @@
 import { computeLatencyStats } from '../lib/percentile.js';
+import {
+  buildSloMatch,
+  formatSloEndpointLabel,
+  formatSloMethodLabel
+} from '../lib/slo-matching.js';
 import { LatencyAlert } from '../models/LatencyAlert.js';
 import { LatencyMinuteBucket } from '../models/LatencyMinuteBucket.js';
+import { RequestLatencySample } from '../models/RequestLatencySample.js';
 import { getAllEnabledSlos } from './slo.service.js';
 
 function alertDedupeKey({ endpoint, method, metric }) {
   return `${method || '*'}:${endpoint}:${metric}`;
 }
 
-function formatAlertMessage({ endpoint, metric, currentValue, budgetValue, deploymentVersion }) {
-  return `Latency SLO Violation — ${endpoint} ${metric.toUpperCase()} ${currentValue}ms (budget ${budgetValue}ms)${
+function formatAlertMessage({
+  endpoint,
+  method,
+  metric,
+  currentValue,
+  budgetValue,
+  deploymentVersion,
+  status
+}) {
+  const endpointLabel = formatSloEndpointLabel(endpoint);
+  const methodLabel = formatSloMethodLabel(method);
+  const valueText =
+    metric === 'availability' ? `${currentValue}%` : `${Math.round(currentValue)}ms`;
+  const budgetText =
+    metric === 'availability' ? `${budgetValue}%` : `${Math.round(budgetValue)}ms`;
+
+  if (status === 'warning') {
+    return `Latency SLO Warning — ${methodLabel} ${endpointLabel} ${metric.toUpperCase()} ${valueText} is above budget ${budgetText}`;
+  }
+
+  return `Latency SLO Violation — ${methodLabel} ${endpointLabel} ${metric.toUpperCase()} ${valueText} exceeded budget ${budgetText}${
     deploymentVersion ? ` · version ${deploymentVersion}` : ''
   }`;
 }
 
-async function getRecentMinuteBuckets({ route, method, minutes }) {
+async function getRecentSamplesForSlo({ endpoint, method, minutes }) {
   const since = new Date(Date.now() - minutes * 60 * 1000);
   const query = {
-    route,
-    minuteStart: { $gte: since }
+    createdAt: { $gte: since },
+    ...buildSloMatch(endpoint, method)
   };
 
-  if (method && method !== '*') {
-    query.method = method;
-  }
-
-  return LatencyMinuteBucket.find(query).sort({ minuteStart: 1 }).lean();
+  return RequestLatencySample.find(query)
+    .select('durationMs isError deploymentVersion createdAt route method')
+    .sort({ createdAt: -1 })
+    .lean();
 }
 
-function evaluateConsecutiveViolations(buckets, budgetMs, metric, requiredMinutes) {
-  if (!buckets.length || !budgetMs) {
+async function getRecentMinuteBucketsForSlo({ endpoint, method, minutes }) {
+  const since = new Date(Date.now() - minutes * 60 * 1000);
+  const query = {
+    minuteStart: { $gte: since },
+    ...buildSloMatch(endpoint, method)
+  };
+
+  const rows = await LatencyMinuteBucket.find(query).sort({ minuteStart: 1 }).lean();
+  const merged = new Map();
+
+  for (const bucket of rows) {
+    const key = bucket.minuteStart.toISOString();
+    const existing = merged.get(key) || {
+      minuteStart: bucket.minuteStart,
+      count: 0,
+      errorCount: 0,
+      durationSamples: [],
+      deploymentVersion: bucket.deploymentVersion
+    };
+
+    existing.count += bucket.count || 0;
+    existing.errorCount += bucket.errorCount || 0;
+    existing.durationSamples.push(...(bucket.durationSamples || []));
+    existing.deploymentVersion = bucket.deploymentVersion || existing.deploymentVersion;
+    merged.set(key, existing);
+  }
+
+  return [...merged.values()].sort((a, b) => a.minuteStart - b.minuteStart);
+}
+
+function evaluateSampleViolation({ samples, metric, budgetValue }) {
+  if (!samples.length || budgetValue == null) {
+    return {
+      violating: false,
+      warning: false,
+      currentValue: null,
+      maxMs: null,
+      sampleCount: 0
+    };
+  }
+
+  const durations = samples.map((sample) => sample.durationMs);
+  const stats = computeLatencyStats(durations);
+  const errors = samples.filter((sample) => sample.isError).length;
+  const currentValue =
+    metric === 'availability'
+      ? Number(((((samples.length - errors) / samples.length) * 100)).toFixed(2))
+      : metric === 'p95'
+        ? stats.p95Ms
+        : stats.p99Ms;
+
+  const violating =
+    metric === 'availability'
+      ? currentValue < budgetValue
+      : currentValue > budgetValue;
+
+  const warning =
+    !violating &&
+    metric !== 'availability' &&
+    stats.maxMs > budgetValue;
+
+  return {
+    violating,
+    warning,
+    currentValue,
+    maxMs: stats.maxMs,
+    sampleCount: stats.count,
+    deploymentVersion: samples[0]?.deploymentVersion || null
+  };
+}
+
+function evaluateConsecutiveMinuteViolations(buckets, budgetMs, metric, requiredMinutes) {
+  if (!buckets.length || budgetMs == null) {
     return { violating: false, currentValue: null, consecutiveMinutes: 0 };
   }
 
@@ -71,46 +166,82 @@ function evaluateAvailabilityViolation(buckets, targetPct, requiredMinutes) {
   };
 }
 
+async function upsertAlert({
+  slo,
+  metric,
+  budgetValue,
+  evaluation,
+  status
+}) {
+  const dedupeKey = alertDedupeKey({
+    endpoint: slo.endpoint,
+    method: slo.method,
+    metric
+  });
+
+  const activeAlert = await LatencyAlert.findOne({
+    dedupeKey,
+    status: { $in: ['warning', 'violating'] }
+  });
+
+  const sloTarget =
+    metric === 'availability'
+      ? `${slo.availabilityTarget}% availability`
+      : `${metric.toUpperCase()} < ${budgetValue}ms`;
+
+  const message = formatAlertMessage({
+    endpoint: slo.endpoint,
+    method: slo.method,
+    metric,
+    currentValue: evaluation.currentValue,
+    budgetValue,
+    deploymentVersion: evaluation.deploymentVersion,
+    status
+  });
+
+  if (activeAlert) {
+    activeAlert.currentValue = evaluation.currentValue;
+    activeAlert.deploymentVersion = evaluation.deploymentVersion;
+    activeAlert.status = status;
+    activeAlert.message = message;
+    if (status === 'violating' || status === 'warning') {
+      activeAlert.violationDurationMs = Date.now() - activeAlert.violationStartedAt.getTime();
+    }
+    if (status === 'resolved') {
+      activeAlert.resolvedAt = new Date();
+      activeAlert.violationDurationMs = Date.now() - activeAlert.violationStartedAt.getTime();
+    }
+    await activeAlert.save();
+    return activeAlert.toObject();
+  }
+
+  if (status === 'resolved') {
+    return null;
+  }
+
+  const alert = await LatencyAlert.create({
+    dedupeKey,
+    endpoint: slo.endpoint,
+    method: slo.method,
+    metric,
+    status,
+    currentValue: evaluation.currentValue,
+    budgetValue,
+    sloTarget,
+    deploymentVersion: evaluation.deploymentVersion,
+    violationStartedAt: new Date(),
+    message
+  });
+
+  return alert.toObject();
+}
+
 export async function evaluateLatencyAlerts() {
   const slos = await getAllEnabledSlos();
   const results = [];
 
   for (const slo of slos) {
     const metric = slo.primaryMetric;
-    const buckets = await getRecentMinuteBuckets({
-      route: slo.endpoint,
-      method: slo.method,
-      minutes: slo.alertConsecutiveMinutes + 2
-    });
-
-    let evaluation;
-    if (metric === 'availability') {
-      evaluation = evaluateAvailabilityViolation(
-        buckets,
-        slo.availabilityTarget,
-        slo.alertConsecutiveMinutes
-      );
-    } else {
-      const budgetMs = metric === 'p95' ? slo.p95BudgetMs : slo.p99BudgetMs;
-      evaluation = evaluateConsecutiveViolations(
-        buckets,
-        budgetMs,
-        metric,
-        slo.alertConsecutiveMinutes
-      );
-    }
-
-    const dedupeKey = alertDedupeKey({
-      endpoint: slo.endpoint,
-      method: slo.method,
-      metric
-    });
-
-    const activeAlert = await LatencyAlert.findOne({
-      dedupeKey,
-      status: { $in: ['warning', 'violating'] }
-    });
-
     const budgetValue =
       metric === 'availability'
         ? slo.availabilityTarget
@@ -118,55 +249,67 @@ export async function evaluateLatencyAlerts() {
           ? slo.p95BudgetMs
           : slo.p99BudgetMs;
 
-    if (evaluation.violating) {
-      const deploymentVersion = buckets.at(-1)?.deploymentVersion || null;
-      const sloTarget =
-        metric === 'availability'
-          ? `${slo.availabilityTarget}% availability`
-          : `${metric.toUpperCase()} < ${budgetValue}ms`;
+    const [samples, buckets] = await Promise.all([
+      getRecentSamplesForSlo({
+        endpoint: slo.endpoint,
+        method: slo.method,
+        minutes: slo.alertConsecutiveMinutes
+      }),
+      getRecentMinuteBucketsForSlo({
+        endpoint: slo.endpoint,
+        method: slo.method,
+        minutes: slo.alertConsecutiveMinutes + 2
+      })
+    ]);
 
-      if (activeAlert) {
-        activeAlert.currentValue = evaluation.currentValue;
-        activeAlert.deploymentVersion = deploymentVersion;
-        activeAlert.status = 'violating';
-        activeAlert.violationDurationMs = Date.now() - activeAlert.violationStartedAt.getTime();
-        activeAlert.message = formatAlertMessage({
-          endpoint: slo.endpoint,
-          metric,
-          currentValue: evaluation.currentValue,
-          budgetValue,
-          deploymentVersion
-        });
-        await activeAlert.save();
-        results.push(activeAlert.toObject());
-      } else {
-        const alert = await LatencyAlert.create({
-          dedupeKey,
-          endpoint: slo.endpoint,
-          method: slo.method,
-          metric,
-          status: 'violating',
-          currentValue: evaluation.currentValue,
-          budgetValue,
-          sloTarget,
-          deploymentVersion,
-          violationStartedAt: new Date(),
-          message: formatAlertMessage({
-            endpoint: slo.endpoint,
-            metric,
-            currentValue: evaluation.currentValue,
-            budgetValue,
-            deploymentVersion
-          })
-        });
-        results.push(alert.toObject());
-      }
-    } else if (activeAlert) {
-      activeAlert.status = 'resolved';
-      activeAlert.resolvedAt = new Date();
-      activeAlert.violationDurationMs = Date.now() - activeAlert.violationStartedAt.getTime();
-      await activeAlert.save();
-      results.push(activeAlert.toObject());
+    const sampleEvaluation = evaluateSampleViolation({
+      samples,
+      metric,
+      budgetValue
+    });
+
+    let sustainedViolation = { violating: false };
+    if (metric === 'availability') {
+      sustainedViolation = evaluateAvailabilityViolation(
+        buckets,
+        slo.availabilityTarget,
+        slo.alertConsecutiveMinutes
+      );
+    } else if (budgetValue != null) {
+      sustainedViolation = evaluateConsecutiveMinuteViolations(
+        buckets,
+        budgetValue,
+        metric,
+        slo.alertConsecutiveMinutes
+      );
+    }
+
+    const evaluation = {
+      currentValue: sampleEvaluation.currentValue ?? sustainedViolation.currentValue,
+      deploymentVersion: sampleEvaluation.deploymentVersion || buckets.at(-1)?.deploymentVersion || null,
+      maxMs: sampleEvaluation.maxMs,
+      sampleCount: sampleEvaluation.sampleCount
+    };
+
+    let status = 'resolved';
+    if (sampleEvaluation.violating || sustainedViolation.violating) {
+      status = 'violating';
+    } else if (sampleEvaluation.warning) {
+      status = 'warning';
+    }
+
+    if (status === 'violating' || status === 'warning') {
+      const alert = await upsertAlert({ slo, metric, budgetValue, evaluation, status });
+      if (alert) results.push(alert);
+    } else {
+      const resolved = await upsertAlert({
+        slo,
+        metric,
+        budgetValue,
+        evaluation,
+        status: 'resolved'
+      });
+      if (resolved) results.push(resolved);
     }
   }
 
@@ -198,7 +341,9 @@ export async function listAlerts(filters = {}) {
   return alerts.map((alert) => ({
     id: String(alert._id),
     endpoint: alert.endpoint,
+    endpointLabel: formatSloEndpointLabel(alert.endpoint),
     method: alert.method,
+    methodLabel: formatSloMethodLabel(alert.method),
     metric: alert.metric,
     status: alert.status,
     currentValue: alert.currentValue,
@@ -220,7 +365,9 @@ export async function getAlert(alertId) {
   return {
     id: String(alert._id),
     endpoint: alert.endpoint,
+    endpointLabel: formatSloEndpointLabel(alert.endpoint),
     method: alert.method,
+    methodLabel: formatSloMethodLabel(alert.method),
     metric: alert.metric,
     status: alert.status,
     currentValue: alert.currentValue,
